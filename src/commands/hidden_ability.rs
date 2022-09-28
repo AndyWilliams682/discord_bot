@@ -3,7 +3,7 @@ use regex::Regex;
 use serenity::model::application::interaction::application_command::{CommandDataOptionValue};
 use serde_json::{Value};
 
-const MIN_CHARS: usize = 2; // Shortest name is "Mew"
+const MIN_CHARS: usize = 3; // Shortest name is "Mew"
 const MAX_CHARS: usize = 25; // arbitrary maximum
 const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 
