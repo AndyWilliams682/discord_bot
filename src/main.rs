@@ -2,14 +2,13 @@ use std::env;
 
 use serenity::async_trait;
 use serenity::model::application::command::{CommandOptionType};
-use serenity::model::application::interaction::application_command::{CommandDataOptionValue, ApplicationCommandInteraction};
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::gateway::Ready;
 use serenity::model::id::GuildId;
 use serenity::prelude::*;
-use reqwest;
-use serde_json::{Value};
-use regex::Regex;
+
+mod commands;
+pub use crate::commands::hidden_ability;
 
 struct Handler;
 
@@ -54,7 +53,17 @@ impl EventHandler for Handler {
 
             let content = match command.data.name.as_str() {
                 "ping" => "Hey, I'm alive!".to_string(),
-                "ha" => hidden_ability(&command).await,
+                "ha" => {
+                    let options = command
+                        .data
+                        .options
+                        .get(0)
+                        .expect("Expected string option")
+                        .resolved
+                        .as_ref()
+                        .expect("Expected string object");
+                    hidden_ability::get_pokemon_ha_from_api(options).await
+                },
                 _ => "not implemented :(".to_string(),
             };
 
@@ -69,70 +78,6 @@ impl EventHandler for Handler {
                 println!("Cannot respond to slash command: {}", why);
             }
         }
-    }
-}
-
-async fn hidden_ability(command: &ApplicationCommandInteraction) -> String {
-    let options = command
-        .data
-        .options
-        .get(0)
-        .expect("Expected string option")
-        .resolved
-        .as_ref()
-        .expect("Expected string object");
-
-    if let CommandDataOptionValue::String(string) = options {
-        let chars_to_null = Regex::new(r"[':.]").unwrap();
-        let valid_chars = Regex::new(r"[^a-z2-]").unwrap();
-
-        let lower_string = string
-            .to_lowercase()
-            .replace(" ", "-")
-            .replace("♀", "f")
-            .replace("♂", "m");
-        let no_punctuation = chars_to_null.replace_all(&lower_string, "");
-        let split = no_punctuation.split(", ");
-
-        let mut output: String = "".to_owned();
-
-        for input_pokemon in split {
-            // No pokemon (yet) of name length <= 2
-            if input_pokemon.len() <= 2 {
-                continue;
-            } else if valid_chars.is_match(input_pokemon) {
-                continue;
-            }
-            let url = format!("https://pokeapi.co/api/v2/pokemon/{}", input_pokemon);
-            let response = reqwest::get(&url).await.unwrap();
-            let input_pokemon_ability = match response.status() {
-                reqwest::StatusCode::OK => {
-                    match response.json::<Value>().await {
-                        Ok(parsed) => {
-                            let abilities: &Vec<Value> = parsed["abilities"].as_array().unwrap();
-                            let mut hidden_ability: String = "No Hidden Ability".to_string();
-                            for ability in abilities {
-                                if ability["is_hidden"] == true {
-                                    hidden_ability = ability["ability"]["name"].as_str().unwrap().to_string();
-                                }
-                            }
-                            hidden_ability
-                        }
-                        Err(_) => "This shouldn't happen :(".to_string()
-                    }
-                }
-                other => {
-                    format!("{}", other).to_string()
-                }
-            };
-            output.push_str(&format!("{}: {}\n", input_pokemon, input_pokemon_ability));
-        }
-        if output.len() == 0 {
-            output.push_str(&format!("Your input \"{}\" has no valid pokemon", string));
-        }
-        output.to_string()
-    } else {
-        "Please provide valid Pokemon".to_string()
     }
 }
 
