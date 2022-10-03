@@ -28,7 +28,7 @@ impl PokeAPIName {
         let contains_forbidden_chars = forbidden_chars.is_match(&no_punctuation_s);
 
         if is_empty_or_whitespace || is_too_short || is_too_long || contains_forbidden_chars {
-            Err(format!("{} is not a valid PokeAPI Name", s))
+            Err(format!("{} is not a valid PokeAPI Name\n", s))
         } else {
             Ok(Self(s))
         }
@@ -56,8 +56,8 @@ pub async fn get_pokemon_ha_from_api (command: &CommandDataOptionValue) -> Strin
         for input_name in split {
             let api_name = match PokeAPIName::parse(input_name.to_owned()) {
                 Ok(api_name) => api_name,
-                Err(_) => {
-                    output.push_str(&format!("{} is not a valid PokeAPI Name", input_name));
+                Err(why) => {
+                    output.push_str(&why);
                     continue
                 }
             };
@@ -77,7 +77,7 @@ pub async fn get_pokemon_ha_from_api (command: &CommandDataOptionValue) -> Strin
                             }
                             hidden_ability
                         }
-                        Err(_) => "This shouldn't happen :(".to_string()
+                        Err(why) => why.to_string()
                     }
                 }
                 other => {
