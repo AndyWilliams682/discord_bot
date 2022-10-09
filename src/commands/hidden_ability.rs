@@ -108,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_strings_is_rejected() {
+    fn empty_string_is_rejected() {
         let name = "".to_string();
         assert_err!(hidden_ability::PokeAPIName::parse(name));
     }
@@ -162,7 +162,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_name_is_rejected() {
         let invalid_option = CommandDataOptionValue::String("./:-".to_string());
-        assert_eq!("./:- is not a valid PokeAPI Name",
+        assert_eq!("./:- is not a valid PokeAPI Name\n",
                    hidden_ability::get_pokemon_ha_from_api(&invalid_option).await)
     }
 
