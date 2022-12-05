@@ -30,6 +30,9 @@ impl EventHandler for Handler {
                     command.name("ping").description("A ping command")
                 })
                 .create_application_command(|command| {
+                    command.name("secret").description("Shhh, no telling")
+                })
+                .create_application_command(|command| {
                     command
                         .name("ha")
                         .description("Outputs the hidden abilities of all pokemon provided")
@@ -64,6 +67,7 @@ impl EventHandler for Handler {
                         .expect("Expected string object");
                     hidden_ability::get_pokemon_ha_from_api(options).await
                 },
+                "secret" => "Hello secret Santa gamers, I have been informed that SOMEONE'S deck will arrive at their address within the week! HOWEVER, I have also been informed that the recipient should not open this package until a SECOND package arrives. HOW MYSTERIOUS".to_string(),
                 _ => "not implemented :(".to_string(),
             };
 
