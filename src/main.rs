@@ -1,16 +1,19 @@
 use std::env;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serenity::async_trait;
-use serenity::model::application::command::{CommandOptionType};
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::gateway::Ready;
 use serenity::model::id::GuildId;
 use serenity::prelude::*;
 
 mod commands;
-pub use crate::commands::hidden_ability;
+mod loops;
 
-struct Handler;
+struct Handler {
+    is_loop_running: AtomicBool
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -26,28 +29,19 @@ impl EventHandler for Handler {
 
         let _commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
             commands
-                .create_application_command(|command| {
-                    command.name("ping").description("A ping command")
-                })
-                .create_application_command(|command| {
-                    command.name("secret").description("Shhh, no telling")
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("ha")
-                        .description("Outputs the hidden abilities of all pokemon provided")
-                        .create_option(|option| {
-                            option
-                                .name("pokemon_list")
-                                .description(
-                                    "List of Pokemon (eg: unown, vulpix-alola, nidoran-f, falinks)",
-                                )
-                                .kind(CommandOptionType::String)
-                                .required(true)
-                        })
-                })
+                .create_application_command(|command| commands::ping::register(command))
+                .create_application_command(|command| commands::hidden_ability::register(command))
+                .create_application_command(|command| commands::secret::register(command))
         })
         .await;
+
+        let loop_ctx = Arc::new(ctx);
+
+        if !self.is_loop_running.load(Ordering::Relaxed) {
+            loops::status::start(loop_ctx);
+
+            self.is_loop_running.swap(true, Ordering::Relaxed);
+        }
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
@@ -55,19 +49,9 @@ impl EventHandler for Handler {
             println!("Received command interaction: {:#?}", command);
 
             let content = match command.data.name.as_str() {
-                "ping" => "Hey, I'm alive!".to_string(),
-                "ha" => {
-                    let options = command
-                        .data
-                        .options
-                        .get(0)
-                        .expect("Expected string option")
-                        .resolved
-                        .as_ref()
-                        .expect("Expected string object");
-                    hidden_ability::get_pokemon_ha_from_api(options).await
-                },
-                "secret" => "Hello secret Santa gamers, I have been informed that SOMEONE'S deck will arrive at their address within the week! HOWEVER, I have also been informed that the recipient should not open this package until a SECOND package arrives. HOW MYSTERIOUS".to_string(),
+                "ping" => commands::ping::run(&command.data.options),
+                "ha" => commands::hidden_ability::run(&command.data.options).await,
+                "secret" => commands::secret::run(&command.data.options),
                 _ => "not implemented :(".to_string(),
             };
 
@@ -87,20 +71,14 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
-    /*
-    To Do:
-    Error responses should be ethereal to the command user, if possible
-    Clean up the code probably
-        Utilize Rustemon library for API calls
-        IDK what else
-    */
-
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
     // Build our client.
     let mut client = Client::builder(token, GatewayIntents::empty())
-        .event_handler(Handler)
+        .event_handler(Handler {
+            is_loop_running: AtomicBool::new(false),
+        })
         .await
         .expect("Error creating client");
 

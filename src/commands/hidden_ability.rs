@@ -1,11 +1,38 @@
 use std::fmt;
 use regex::Regex;
-use serenity::model::application::interaction::application_command::{CommandDataOptionValue};
-use serde_json::{Value};
+use serenity::builder::CreateApplicationCommand;
+use serenity::model::application::command::CommandOptionType;
+use serenity::model::application::interaction::application_command::{CommandDataOptionValue, CommandDataOption};
+use serde_json::Value;
 
 const MIN_CHARS: usize = 3; // Shortest name is "Mew"
 const MAX_CHARS: usize = 25; // arbitrary maximum
 const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
+
+pub async fn run(options: &[CommandDataOption]) -> String {
+    let option = options
+        .get(0)
+        .expect("Expected string option")
+        .resolved
+        .as_ref()
+        .expect("Expected string object");
+    get_pokemon_ha_from_api(option).await
+}
+
+pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
+    command
+        .name("ha")
+        .description("Outputs the hidden abilities of all pokemon provided")
+        .create_option(|option| {
+            option
+                .name("pokemon_list")
+                .description(
+                    "List of Pokemon (eg: unown, vulpix-alola, nidoran-f, falinks)",
+                )
+                .kind(CommandOptionType::String)
+                .required(true)
+        })
+}
 
 #[derive(Debug)]
 pub struct PokeAPIName(String);
