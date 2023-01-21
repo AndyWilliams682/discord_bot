@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serenity::async_trait;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::gateway::Ready;
-use serenity::model::id::GuildId;
+use serenity::model::application::command::Command;
 use serenity::prelude::*;
 
 mod commands;
@@ -20,14 +20,7 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
-        let guild_id = GuildId(
-            env::var("GUILD_ID")
-                .expect("Expected GUILD_ID in environment")
-                .parse()
-                .expect("GUILD_ID must be an integer"),
-        );
-
-        let _commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
+        let _global_command = Command::set_global_application_commands(&ctx.http, |commands| {
             commands
                 .create_application_command(|command| commands::ping::register(command))
                 .create_application_command(|command| commands::hidden_ability::register(command))
@@ -73,6 +66,11 @@ impl EventHandler for Handler {
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+
+    // use serenity::http::client::Http;
+    // let http_client = Http::new_with_application_id(&token, 704782601273213079);
+    // let delete_command = http_client.delete_guild_application_command(323928878420590592, 1049455263440191528).await;
+    // println!("{:?}", delete_command);
 
     // Build our client.
     let mut client = Client::builder(token, GatewayIntents::empty())
