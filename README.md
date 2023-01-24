@@ -1,5 +1,5 @@
 # discord_bot
-A project for learning Rust and creating a bot for Discord
+A project for learning Rust and creating a bot for Discord with the Serenity crate.
 
 
 
