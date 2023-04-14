@@ -1,7 +1,19 @@
 # discord_bot
 A project for learning Rust and creating a bot for Discord with the Serenity crate.
 
+# Docker Compose
+Clone the repo locally
 
+Create .env
+```
+DISCORD_TOKEN=<TOKEN>
+GUILD_ID=<GUID> 
+```
+
+Run the docker-compose command:
+```
+docker-compose -f docker-compose.yml up -d --build
+```
 
 # Docker Build
 To build the docker image run:
