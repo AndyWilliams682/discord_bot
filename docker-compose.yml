@@ -1,0 +1,9 @@
+version: "3.7"
+services:
+  discord_bot:
+    container_name: discord_bot
+    build: .
+    restart: always
+    environment:
+      - DISCORD_TOKEN={DISCORD_TOKEN}
+      - GUILD_ID={GUILD_ID}
