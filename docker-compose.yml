@@ -1,0 +1,8 @@
+version: "3.7"
+services:
+  discord_bot:
+    container_name: discord_bot
+    build: .
+    restart: always
+    env_file:
+      - .env
