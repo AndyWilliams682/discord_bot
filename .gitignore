@@ -4,3 +4,4 @@ discord_bot.iml
 /.idea/
 /.vscode/
 deploy
+.env
