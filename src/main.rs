@@ -28,6 +28,7 @@ impl EventHandler for Handler {
                 .create_application_command(|command| commands::hidden_ability::register(command))
                 .create_application_command(|command| commands::secret::register(command))
                 .create_application_command(|command| commands::poe::register(command))
+                .create_application_command(|command| commands::test_feature::register(command))
         })
         .await;
 
@@ -49,6 +50,7 @@ impl EventHandler for Handler {
                 "ha" => commands::hidden_ability::run(&command.data.options).await,
                 "secret" => commands::secret::run(&command.data.options),
                 "poe" => commands::poe::run(&command.data.options, &self.config),
+                "test_feature" => commands::test_feature::run().await,
                 _ => "not implemented :(".to_string(),
             };
 
