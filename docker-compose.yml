@@ -6,5 +6,5 @@ services:
     restart: always
     # env_file:
     #   - .env
-    enviroment:
+    environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
