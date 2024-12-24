@@ -7,4 +7,4 @@ services:
     # env_file:
     #   - .env
     enviroment:
-     - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
