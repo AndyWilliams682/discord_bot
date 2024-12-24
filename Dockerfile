@@ -3,4 +3,4 @@ WORKDIR /usr/src/myapp
 COPY . .
 RUN cargo install --path .
 
-CMD ["myapp"]
+CMD ["discord_bot"]
