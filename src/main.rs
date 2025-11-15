@@ -44,19 +44,19 @@ impl EventHandler for Handler {
         if let Interaction::ApplicationCommand(command) = interaction {
             println!("Received command interaction: {:#?}", command);
 
-            let content = match command.data.name.as_str() {
-                "ping" => commands::ping::run(&command.data.options),
-                "ha" => commands::hidden_ability::run(&command.data.options).await,
-                "secret" => commands::secret::run(&command.data.options),
-                "poe" => commands::poe::run(&command.data.options, &self.config),
-                _ => "not implemented :(".to_string(),
+            let (content, is_ephemeral) = match command.data.name.as_str() {
+                "ping" => (commands::ping::run(&command.data.options), false),
+                "ha" => (commands::hidden_ability::run(&command.data.options).await, false),
+                "secret" => (commands::secret::run(&command.data.options, &command.user), true),
+                "poe" => (commands::poe::run(&command.data.options, &self.config), false),
+                _ => ("not implemented :(".to_string(), true),
             };
 
             if let Err(why) = command
                 .create_interaction_response(&ctx.http, |response| {
                     response
                         .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| message.content(content))
+                        .interaction_response_data(|message| message.content(content).ephemeral(is_ephemeral))
                 })
                 .await
             {

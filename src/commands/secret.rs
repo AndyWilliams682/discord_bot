@@ -1,22 +1,104 @@
 use serenity::builder::CreateApplicationCommand;
+use serenity::model::application::command::CommandOptionType;
+use serenity::builder::CreateMessage;
 use serenity::model::prelude::interaction::application_command::CommandDataOption;
+use serenity::model::id::UserId;
+use serenity::model::user::User;
+use serenity::prelude::Mentionable;
+use rusqlite::{Connection, Result, params, Error};
 
-pub fn run(options: &[CommandDataOption]) -> String {
-    "Hey this command worked".to_string()
+
+#[derive(Debug)]
+struct Event {
+    id: i32
 }
 
+#[derive(Debug)]
+struct Participation {
+    event: i32,
+    user: i32,
+    user_giftee: i32,
+}
+
+fn check_assignment_validation(assignment: &Vec<usize>) -> bool {
+    for idx in 0..assignment.len() {
+        if assignment[idx] == idx {
+            return false
+        }
+    }
+    return true
+}
+
+
+fn get_latest_year(conn: &Connection) -> Result<i32> {
+    let mut year_stmt = conn.prepare("SELECT MAX(event_id) FROM events")?;
+    let year_iter = year_stmt.query_map([], |row| {
+        Ok(Event { id: row.get(0)? })
+    })?;
+
+    for year in year_iter {
+        return Ok(year?.id)
+    }
+    Ok(0)
+}
+
+
+fn get_latest_giftee(user_id: UserId, conn: &Connection) -> Result<String> {
+    let mut stmt = conn.prepare("
+        SELECT user_giftee
+        FROM participation
+        WHERE user = (?1) AND event = (
+            SELECT MAX(event_id) FROM events
+        )
+    ")?;
+
+    let result: Result<i64, Error> = stmt.query_row(params![user_id.as_u64()], |row| {
+        row.get(0)
+    });
+
+    match result {
+        Ok(giftee_id) => {
+            let uid = UserId(giftee_id as u64);
+            Ok(format!("Your giftee is: {}", uid.mention().to_string()))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Ok("No giftee found - are you sure you're a participant for this event?".to_string())
+        },
+        Err(e) => Err(e)
+    }
+
+    // return match stmt {
+    //     // Success: A row was found, return the value wrapped in Some
+    //     Ok(giftee_id) => Ok(format!("Your giftee is: {}", giftee_id)),
+    //     // Error: Check specifically for rusqlite::Error::QueryReturnedNoRows
+    //     Err(rusqlite::Error::QueryReturnedNoRows) => {
+    //         Ok("No giftee found - are you sure you're a participant for this event?".to_string())
+    //     },
+    //     Err(e) => Err(e),
+    // }
+}
+
+
+pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User) -> Result<String> {
+    // Move this to the main, shouldn't need to re-open every time?
+    let db_file_path = "mtg_secret_santa.bin";
+    let conn = Connection::open(db_file_path)?;
+    if invoker.id == 248966803139723264 { // Griffin's ID, runs hosting command WORK ON THIS NEXT
+        return Ok("You are admin!".to_string());
+    } else { // Other ids run the viewing command WORK ON THIS NEXT
+        return Ok(format!("{}", get_latest_giftee(invoker.id, &conn)?));
+    }
+}
+
+
+pub fn run(_options: &[CommandDataOption], invoker: &User) -> String {
+    match run_wrapped(_options, invoker) {
+        Ok(reply) => reply,
+        Err(e) => format!("{}", e)
+    }
+}
+
+
 pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command.name("secret").description("A secret message command").create_option(|option| {
-        option
-            .name("id")
-            .description("The user to message via the bot")
-            .kind(CommandOptionType::User)
-            .required(true)
-    }).create_option(|option| {
-        option
-            .name("message")
-            .description("The message to send")
-            .kind(CommandOptionType::String)
-            .required(true)
-    })
+    command.name("secret").description("See your recipient for secret santa!")
 }
