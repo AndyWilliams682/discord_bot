@@ -1,17 +1,10 @@
 use serenity::builder::CreateApplicationCommand;
-use serenity::model::application::command::CommandOptionType;
-use serenity::builder::CreateMessage;
 use serenity::model::prelude::interaction::application_command::CommandDataOption;
 use serenity::model::id::UserId;
 use serenity::model::user::User;
 use serenity::prelude::Mentionable;
 use rusqlite::{Connection, Result, params, Error};
 
-
-#[derive(Debug)]
-struct Event {
-    id: i32
-}
 
 #[derive(Debug)]
 struct Participation {
@@ -27,19 +20,6 @@ fn check_assignment_validation(assignment: &Vec<usize>) -> bool {
         }
     }
     return true
-}
-
-
-fn get_latest_year(conn: &Connection) -> Result<i32> {
-    let mut year_stmt = conn.prepare("SELECT MAX(event_id) FROM events")?;
-    let year_iter = year_stmt.query_map([], |row| {
-        Ok(Event { id: row.get(0)? })
-    })?;
-
-    for year in year_iter {
-        return Ok(year?.id)
-    }
-    Ok(0)
 }
 
 
@@ -66,16 +46,6 @@ fn get_latest_giftee(user_id: UserId, conn: &Connection) -> Result<String> {
         },
         Err(e) => Err(e)
     }
-
-    // return match stmt {
-    //     // Success: A row was found, return the value wrapped in Some
-    //     Ok(giftee_id) => Ok(format!("Your giftee is: {}", giftee_id)),
-    //     // Error: Check specifically for rusqlite::Error::QueryReturnedNoRows
-    //     Err(rusqlite::Error::QueryReturnedNoRows) => {
-    //         Ok("No giftee found - are you sure you're a participant for this event?".to_string())
-    //     },
-    //     Err(e) => Err(e),
-    // }
 }
 
 
@@ -84,8 +54,8 @@ pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User) -> Result<Str
     let db_file_path = "mtg_secret_santa.bin";
     let conn = Connection::open(db_file_path)?;
     if invoker.id == 248966803139723264 { // Griffin's ID, runs hosting command WORK ON THIS NEXT
-        return Ok("You are admin!".to_string());
-    } else { // Other ids run the viewing command WORK ON THIS NEXT
+        return Ok("You are admin! Let's add this!".to_string());
+    } else { // Other ids will return their currently assigned giftee
         return Ok(format!("{}", get_latest_giftee(invoker.id, &conn)?));
     }
 }
