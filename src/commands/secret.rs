@@ -72,3 +72,8 @@ pub fn run(_options: &[CommandDataOption], invoker: &User) -> String {
 pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
     command.name("secret").description("See your recipient for secret santa!")
 }
+
+
+pub async fn run_secret_button_logic(user: &serenity::model::user::User) -> String {
+    format!("🤫 You pressed the secret button! Your user ID is {}.", user.id.as_u64())
+}

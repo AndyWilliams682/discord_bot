@@ -8,6 +8,7 @@ use serenity::model::application::command::Command;
 use serenity::model::application::interaction::{Interaction, InteractionResponseType};
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
+use serenity::model::application::component::ButtonStyle;
 
 mod commands;
 mod loops;
@@ -41,29 +42,97 @@ impl EventHandler for Handler {
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        if let Interaction::ApplicationCommand(command) = interaction {
-            println!("Received command interaction: {:#?}", command);
+        match interaction {
+            Interaction::ApplicationCommand(command) => {
+                println!("Received command interaction: {:#?}", command);
+                let mut show_button: bool = false; // Might need to make this a list?
+                let invoker = &command.user;
 
-            let (content, is_ephemeral) = match command.data.name.as_str() {
-                "ping" => (commands::ping::run(&command.data.options), false),
-                "ha" => (commands::hidden_ability::run(&command.data.options).await, false),
-                "secret" => (commands::secret::run(&command.data.options, &command.user), true),
-                "poe" => (commands::poe::run(&command.data.options, &self.config), false),
-                _ => ("not implemented :(".to_string(), true),
-            };
+                let (content, is_ephemeral, show_button) = match command.data.name.as_str() {
+                    "ping" => (commands::ping::run(&command.data.options), false, false),
+                    "ha" => (commands::hidden_ability::run(&command.data.options).await, false, false),
+                    "secret" => (commands::secret::run(&command.data.options, &command.user), true, true),
+                    "poe" => (commands::poe::run(&command.data.options, &self.config), false, false),
+                    _ => ("not implemented :(".to_string(), true, false),
+                };
 
-            if let Err(why) = command
-                .create_interaction_response(&ctx.http, |response| {
-                    response
-                        .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| message.content(content).ephemeral(is_ephemeral))
-                })
-                .await
-            {
-                println!("Cannot respond to slash command: {}", why);
-            }
+                if let Err(why) = command
+                    .create_interaction_response(&ctx.http, |response| {
+                        response
+                            .kind(InteractionResponseType::ChannelMessageWithSource)
+                            // .interaction_response_data(|message| message.content(content).ephemeral(is_ephemeral))
+                            .interaction_response_data(|message| {
+                                message.content(content).ephemeral(is_ephemeral);
+
+                                if show_button {
+                                    message.components(|components| {
+                                        components.create_action_row(|row| {
+                                            row.create_button(|button| {
+                                                button.style(ButtonStyle::Success)
+                                                    .label("Reveal Secret")
+                                                    .custom_id("secret_reveal_button")
+                                            })
+                                        })
+                                    });
+                                };
+                                message
+                            })
+                    })
+                    .await
+                {
+                    println!("Cannot respond to slash command: {}", why);
+                }
+            },
+            Interaction::MessageComponent(component) => {
+                if component.data.custom_id.as_str() == "secret_reveal_button" {
+                    
+                    // Run the follow-up logic
+                    let follow_up_response = commands::secret::run_secret_button_logic(&component.user).await;
+    
+                    // Respond to the button press interaction
+                    if let Err(why) = component
+                        .create_interaction_response(&ctx.http, |response| {
+                            response
+                                .kind(InteractionResponseType::ChannelMessageWithSource)
+                                .interaction_response_data(|message| {
+                                    // Use an ephemeral response for a "secret" follow-up
+                                    message.content(follow_up_response).ephemeral(true)
+                                })
+                        })
+                        .await
+                    {
+                        println!("Cannot respond to secret button press: {}", why);
+                    }
+                }
+            },
+            _ => {}
         }
     }
+
+    // async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+    //     if let Interaction::ApplicationCommand(command) = interaction {
+    //         println!("Received command interaction: {:#?}", command);
+
+    //         let (content, is_ephemeral) = match command.data.name.as_str() {
+    //             "ping" => (commands::ping::run(&command.data.options), false),
+    //             "ha" => (commands::hidden_ability::run(&command.data.options).await, false),
+    //             "secret" => (commands::secret::run(&command.data.options, &command.user), true),
+    //             "poe" => (commands::poe::run(&command.data.options, &self.config), false),
+    //             _ => ("not implemented :(".to_string(), true),
+    //         };
+
+    //         if let Err(why) = command
+    //             .create_interaction_response(&ctx.http, |response| {
+    //                 response
+    //                     .kind(InteractionResponseType::ChannelMessageWithSource)
+    //                     .interaction_response_data(|message| message.content(content).ephemeral(is_ephemeral))
+    //             })
+    //             .await
+    //         {
+    //             println!("Cannot respond to slash command: {}", why);
+    //         }
+    //     }
+    // }
 }
 
 #[tokio::main]
