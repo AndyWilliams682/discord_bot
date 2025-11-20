@@ -45,36 +45,37 @@ impl EventHandler for Handler {
         match interaction {
             Interaction::ApplicationCommand(command) => {
                 println!("Received command interaction: {:#?}", command);
-                let mut show_button: bool = false; // Might need to make this a list?
-                let invoker = &command.user;
 
-                let (content, is_ephemeral, show_button) = match command.data.name.as_str() {
-                    "ping" => (commands::ping::run(&command.data.options), false, false),
-                    "ha" => (commands::hidden_ability::run(&command.data.options).await, false, false),
-                    "secret" => (commands::secret::run(&command.data.options, &command.user), true, true),
-                    "poe" => (commands::poe::run(&command.data.options, &self.config), false, false),
-                    _ => ("not implemented :(".to_string(), true, false),
+                let (content, is_ephemeral, shown_button_ids) = match command.data.name.as_str() {
+                    "ping" => (commands::ping::run(&command.data.options), false, vec![]),
+                    "ha" => (commands::hidden_ability::run(&command.data.options).await, false, vec![]),
+                    "secret" => commands::secret::run(&command.data.options, &command.user),
+                    "poe" => (commands::poe::run(&command.data.options, &self.config), false, vec![]),
+                    _ => ("not implemented :(".to_string(), true, vec![]),
                 };
 
                 if let Err(why) = command
                     .create_interaction_response(&ctx.http, |response| {
                         response
                             .kind(InteractionResponseType::ChannelMessageWithSource)
-                            // .interaction_response_data(|message| message.content(content).ephemeral(is_ephemeral))
                             .interaction_response_data(|message| {
                                 message.content(content).ephemeral(is_ephemeral);
 
-                                if show_button {
+                                if shown_button_ids.len() > 0 {
                                     message.components(|components| {
                                         components.create_action_row(|row| {
-                                            row.create_button(|button| {
-                                                button.style(ButtonStyle::Success)
-                                                    .label("Reveal Secret")
-                                                    .custom_id("secret_reveal_button")
-                                            })
-                                        })
+                                            for button_id in &shown_button_ids {
+                                                row.create_button(|button| {
+                                                    button.style(ButtonStyle::Success)
+                                                        .label(button_id) // TODO: Rename the label
+                                                        .custom_id(button_id)
+                                                });
+                                            }
+                                            row
+                                        });
+                                        components
                                     });
-                                };
+                                }
                                 message
                             })
                     })
@@ -84,55 +85,52 @@ impl EventHandler for Handler {
                 }
             },
             Interaction::MessageComponent(component) => {
-                if component.data.custom_id.as_str() == "secret_reveal_button" {
-                    
-                    // Run the follow-up logic
-                    let follow_up_response = commands::secret::run_secret_button_logic(&component.user).await;
+                let (follow_up_result, is_ephemeral, follow_up_buttons) = match component.data.custom_id.as_str() {
+                    "start_new_event" => (commands::secret::start_new_event().await, false, vec!["join_event"]),
+                    "draw_names" => (commands::secret::draw_names(), false, vec![]),
+                    "join_event" => (commands::secret::join_event(&component.user), false, vec![]),
+                    _ => (Ok("How did you even invoke this?".to_string()), true, vec![])
+                };
+
+                let (follow_up_response, is_ephemeral, follow_up_buttons) = match follow_up_result {
+                    Ok(resp) => (resp, is_ephemeral, follow_up_buttons),
+                    Err(e) => (format!("{}", e), true, vec![])
+                };
     
-                    // Respond to the button press interaction
-                    if let Err(why) = component
-                        .create_interaction_response(&ctx.http, |response| {
-                            response
-                                .kind(InteractionResponseType::ChannelMessageWithSource)
-                                .interaction_response_data(|message| {
-                                    // Use an ephemeral response for a "secret" follow-up
-                                    message.content(follow_up_response).ephemeral(true)
-                                })
-                        })
-                        .await
-                    {
-                        println!("Cannot respond to secret button press: {}", why);
-                    }
+                // Respond to the button press interaction
+                if let Err(why) = component
+                    .create_interaction_response(&ctx.http, |response| {
+                        response
+                            .kind(InteractionResponseType::ChannelMessageWithSource)
+                            .interaction_response_data(|message| {
+                                // Use an ephemeral response for a "secret" follow-up
+                                message.content(follow_up_response).ephemeral(is_ephemeral);
+                                if follow_up_buttons.len() > 0 {
+                                    message.components(|components| {
+                                        components.create_action_row(|row| {
+                                            for button_id in &follow_up_buttons {
+                                                row.create_button(|button| {
+                                                    button.style(ButtonStyle::Success)
+                                                        .label(button_id) // TODO: Rename the label
+                                                        .custom_id(button_id)
+                                                });
+                                            }
+                                            row
+                                        });
+                                        components
+                                    });
+                                }
+                                message
+                            })
+                    })
+                    .await
+                {
+                    println!("Cannot respond to secret button press: {}", why);
                 }
             },
             _ => {}
         }
     }
-
-    // async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-    //     if let Interaction::ApplicationCommand(command) = interaction {
-    //         println!("Received command interaction: {:#?}", command);
-
-    //         let (content, is_ephemeral) = match command.data.name.as_str() {
-    //             "ping" => (commands::ping::run(&command.data.options), false),
-    //             "ha" => (commands::hidden_ability::run(&command.data.options).await, false),
-    //             "secret" => (commands::secret::run(&command.data.options, &command.user), true),
-    //             "poe" => (commands::poe::run(&command.data.options, &self.config), false),
-    //             _ => ("not implemented :(".to_string(), true),
-    //         };
-
-    //         if let Err(why) = command
-    //             .create_interaction_response(&ctx.http, |response| {
-    //                 response
-    //                     .kind(InteractionResponseType::ChannelMessageWithSource)
-    //                     .interaction_response_data(|message| message.content(content).ephemeral(is_ephemeral))
-    //             })
-    //             .await
-    //         {
-    //             println!("Cannot respond to slash command: {}", why);
-    //         }
-    //     }
-    // }
 }
 
 #[tokio::main]
