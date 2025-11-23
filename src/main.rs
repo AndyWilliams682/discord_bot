@@ -13,6 +13,16 @@ use serenity::model::application::component::ButtonStyle;
 mod commands;
 mod loops;
 
+fn get_button_label(button_id: &str) -> &str {
+    match button_id {
+        "start_new_event" => "Create New Secret Santa Event",
+        "draw_names" => "Draw Names",
+        "toggle_event_participation" => "Join (or Leave) Secret Santa",
+        _ => "How did you conjure this?"
+    }
+}
+
+
 struct Handler {
     is_loop_running: AtomicBool,
     config: HashMap<String, String>,
@@ -67,7 +77,7 @@ impl EventHandler for Handler {
                                             for button_id in &shown_button_ids {
                                                 row.create_button(|button| {
                                                     button.style(ButtonStyle::Success)
-                                                        .label(button_id) // TODO: Rename the label
+                                                        .label(get_button_label(button_id))
                                                         .custom_id(button_id)
                                                 });
                                             }
@@ -86,9 +96,9 @@ impl EventHandler for Handler {
             },
             Interaction::MessageComponent(component) => {
                 let (follow_up_result, is_ephemeral, follow_up_buttons) = match component.data.custom_id.as_str() {
-                    "start_new_event" => (commands::secret::start_new_event().await, false, vec!["join_event"]),
-                    "draw_names" => (commands::secret::draw_names(), false, vec![]),
-                    "join_event" => (commands::secret::join_event(&component.user), false, vec![]),
+                    "start_new_event" => (commands::secret::start_new_event().await, false, vec!["toggle_event_participation"]),
+                    "draw_names" => (commands::secret::draw_names(&ctx).await, false, vec![]),
+                    "toggle_event_participation" => (commands::secret::toggle_event_participation(&component.user), false, vec![]),
                     _ => (Ok("How did you even invoke this?".to_string()), true, vec![])
                 };
 
@@ -111,7 +121,7 @@ impl EventHandler for Handler {
                                             for button_id in &follow_up_buttons {
                                                 row.create_button(|button| {
                                                     button.style(ButtonStyle::Success)
-                                                        .label(button_id) // TODO: Rename the label
+                                                        .label(get_button_label(button_id))
                                                         .custom_id(button_id)
                                                 });
                                             }

@@ -2,15 +2,16 @@ use serenity::builder::CreateApplicationCommand;
 use serenity::model::prelude::interaction::application_command::CommandDataOption;
 use serenity::model::id::UserId;
 use serenity::model::user::User;
-use serenity::prelude::Mentionable;
+use serenity::prelude::*;
 use rusqlite::{Connection, Result, params, Error};
 use chrono::Datelike;
 use rand::{random, thread_rng};
 use rand::seq::SliceRandom;
+use tokio::task;
 
 
-// const ADMIN_ID: u64 = 255117530253754378;
-const ADMIN_ID: u64 = 248966803139723264; // Grif's ID
+const ADMIN_ID: u64 = 255117530253754378;
+// const ADMIN_ID: u64 = 248966803139723264; // Grif's ID
 const WEIGHTS: [f32; 3] = [0.0, 0.0, 0.5];
 const PREV_RELEVANT_EVENTS: usize = WEIGHTS.len();
 
@@ -74,7 +75,7 @@ pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User) -> Result<(St
     let conn = Connection::open(db_file_path)?;
     if invoker.id == ADMIN_ID { // Griffin's ID, runs hosting command WORK ON THIS NEXT
         return Ok((
-            "You are admin! Let's add this!".to_string(),
+            "Hello admin!".to_string(),
             vec!["start_new_event".to_string(), "draw_names".to_string()]
         ));
     } else { // Other ids will return their currently assigned giftee
@@ -129,25 +130,57 @@ pub fn is_event_open(conn: &Connection) -> Result<bool> {
 }
 
 
-pub fn join_event(invoker: &User) -> Result<String> {
+pub fn toggle_event_participation(invoker: &User) -> Result<String> {
     let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
     let conn = Connection::open(db_file_path)?;
     if !is_event_open(&conn)? {
         return Ok("Unable to join - the names have already been drawn for this event.".to_string())
     }
+
     conn.execute("
         INSERT OR IGNORE INTO users (user_id, username)
         VALUES (?1, ?2);
     ", params![invoker.id.as_u64(), invoker.name])?;
-    conn.execute("
-        INSERT INTO participation (event, user, user_giftee)
-        VALUES (?1, ?2, NULL);
-    ", params![current_year(), invoker.id.as_u64()])?;
-    Ok(format!("{} has joined the event!", invoker.mention()))
+    
+    let mut stmt = conn.prepare("
+        SELECT 1
+        FROM participation
+        WHERE user = ?1
+        LIMIT 1;
+    ")?;
+    let mut iter = stmt.query_map(params![invoker.id.as_u64()], |_row| Ok(()))?;
+
+    let mut count_participants_stmt = conn.prepare("
+        SELECT COUNT(*)
+        FROM participation
+        WHERE event = ?1;
+    ")?;
+    let participant_count: i64 = count_participants_stmt.query_row(params![current_year()], |row| {
+        row.get(0)
+    })?;
+
+    return match iter.next().transpose()?.is_some() { // Checking if user is already in the event
+        true => {
+            conn.execute("
+                DELETE FROM participation
+                WHERE user = ?1 AND event = ?2
+            ", params![invoker.id.as_u64(), current_year()])?;
+            Ok(format!("{} has left the event. {} has {} participants", invoker.mention(), current_year(), participant_count))
+        },
+        false => {
+            conn.execute("
+                INSERT INTO participation (event, user, user_giftee)
+                VALUES (?1, ?2, NULL);
+            ", params![current_year(), invoker.id.as_u64()])?;
+            Ok(format!("{} has joined the event! {} has {} participants", invoker.mention(), current_year(), participant_count))
+        }
+    }
 }
 
 
-pub fn draw_names() -> Result<String> {
+// This exists to make the tokio code cleaner
+// Break this into smaller functions
+fn get_drawn_names() -> Result<Vec<(u64, u64)>> {
     let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
     let conn = Connection::open(db_file_path)?;
     let mut prev_years_stmt = conn.prepare("
@@ -201,15 +234,38 @@ pub fn draw_names() -> Result<String> {
         viable_solution = check_assignment_validation(&solution, &giftee_history);
     };
 
-    for participant_idx in 0..current_participants.len() {
-        let participant_id = current_participants[participant_idx];
-        let giftee_id = current_participants[solution[participant_idx]];
+    let assignments: Vec<(u64, u64)> = solution.iter().enumerate().map(|(participant_idx, &giftee_idx)| {
+        (current_participants[participant_idx], current_participants[giftee_idx])
+    }).collect();
+
+    for &(participant_id, giftee_id) in assignments.iter() {
         conn.execute("
             UPDATE participation
             SET user_giftee = ?1
             WHERE event = ?2 AND user = ?3;
         ", params![giftee_id, current_year(), participant_id])?;
     }
+    Ok(assignments)
+}
 
+
+pub async fn draw_names(ctx: &Context) -> Result<String> {
+    let assignments = task::spawn_blocking(move || {
+        get_drawn_names()
+    }).await.expect("Failed to run database tasks")?;
+
+    for &(participant_id, giftee_id) in assignments.iter() {
+        if let Ok(participant_user) = UserId(participant_id).to_user(&ctx.http).await {
+            let giftee_mention = UserId(giftee_id).mention().to_string();
+            let dm_message = format!("🎉 Your Secret Santa assignment for the {} event is {}! 🎉", current_year(), giftee_mention);
+            if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
+                if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {
+                    println!("Could not fetch Discord user object for ID {}: {}", participant_id, why);
+                }
+            }
+        } else {
+            println!("Could not fetch Discord user object for ID {}", participant_id);
+        }
+    }
     Ok("Names have been drawn! Check your DMs".to_string())
 }
