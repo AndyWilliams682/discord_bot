@@ -3,15 +3,43 @@ use rusqlite::{Connection, Result, params};
 use serenity::model::user::User;
 use serenity::model::prelude::interaction::application_command::{CommandDataOption, CommandDataOptionValue};
 use serenity::model::prelude::command::CommandOptionType;
-use url::Url;
+use reqwest::header::CONTENT_TYPE;
+use reqwest::{Client, Url};
 
 
-fn is_valid_url(s: &str) -> bool {
-    match Url::parse(s) {
+async fn is_valid_url(s: &str) -> bool {
+    let url = match Url::parse(s) {
         Ok(url) => {
-            matches!(url.scheme(), "http" | "https")
+            if !matches!(url.scheme(), "http" | "https") {
+                return false
+            }
+            url
         },
-        Err(_) => false,
+        Err(_) => return false,
+    };
+
+    let client = Client::new();
+    match client.head(url).send().await {
+        Ok(response) => {
+            if !response.status().is_success() {
+                return false;
+            }
+
+            if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
+                if let Ok(content_type_str) = content_type.to_str() {
+                    let content_type_lower = content_type_str.to_lowercase();
+
+                    return content_type_lower.starts_with("image/gif") ||
+                           content_type_lower.starts_with("video/webm") ||
+                           content_type_lower.starts_with("video/mp4");
+                }
+            }
+            false
+        }
+        Err(e) => {
+            eprintln!("Network error verifying URL: {}", e);
+            false
+        }
     }
 }
 
@@ -29,7 +57,7 @@ pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicatio
 }
 
 
-fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
+async fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
     let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
     let conn = Connection::open(db_file_path)?;
 
@@ -38,7 +66,7 @@ fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
         VALUES (?1, ?2);
     ", params![invoker.id.as_u64(), invoker.name])?;
 
-    return match is_valid_url(&url) {
+    return match is_valid_url(&url).await {
         true => {
             conn.execute("
                 INSERT INTO gifs (submitted_by, url, posts)
@@ -51,7 +79,7 @@ fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
 }
 
 
-pub fn run(options: &[CommandDataOption], invoker: &User) -> String {
+pub async fn run(options: &[CommandDataOption], invoker: &User) -> String {
     let first_option = options
         .get(0)
         .expect("Expected string option")
@@ -59,7 +87,7 @@ pub fn run(options: &[CommandDataOption], invoker: &User) -> String {
         .as_ref()
         .expect("Expected string object");
     if let CommandDataOptionValue::String(url) = first_option {
-        match run_wrapped(url, invoker) {
+        match run_wrapped(url, invoker).await {
             Ok(reply) => reply,
             Err(e) => format!("{}", e)
         }

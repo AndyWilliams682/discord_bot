@@ -24,6 +24,11 @@ RUN cargo build --release --bin discord_bot
 # --- STAGE 2: FINAL IMAGE (Small) ---
 FROM debian:stable-slim
 
+# Add these RUN commands to install the certs
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /usr/local/bin
 
 COPY config.json /usr/local/bin/

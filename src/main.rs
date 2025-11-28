@@ -18,7 +18,7 @@ fn get_button_label(button_id: &str) -> &str {
         "start_new_event" => "Create New Secret Santa Event",
         "draw_names" => "Draw Names",
         "toggle_event_participation" => "Join (or Leave) Secret Santa",
-        _ => "How did you conjure this?"
+        _ => "How did you conjure this??"
     }
 }
 
@@ -64,7 +64,7 @@ impl EventHandler for Handler {
                     "ha" => (commands::hidden_ability::run(&command.data.options).await, false, vec![]),
                     "secret" => commands::secret::run(&command.data.options, &command.user),
                     "poe" => (commands::poe::run(&command.data.options, &self.config), false, vec![]),
-                    "gotd" => (commands::gotd::run(&command.data.options, &command.user), true, vec![]),
+                    "gotd" => (commands::gotd::run(&command.data.options, &command.user).await, true, vec![]),
                     _ => ("not implemented :(".to_string(), true, vec![]),
                 };
 
