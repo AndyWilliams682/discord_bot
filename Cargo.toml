@@ -16,3 +16,4 @@ openssl = { version = "0.10.35", features = ["vendored"] }
 rand = "0.8.5"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 chrono = { version = "0.4" }
+url = { version = "2.5.7" }

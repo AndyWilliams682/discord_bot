@@ -28,6 +28,7 @@ struct Handler {
     config: HashMap<String, String>,
 }
 
+
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -39,17 +40,19 @@ impl EventHandler for Handler {
                 .create_application_command(|command| commands::hidden_ability::register(command))
                 .create_application_command(|command| commands::secret::register(command))
                 .create_application_command(|command| commands::poe::register(command))
+                .create_application_command(|command| commands::gotd::register(command))
         })
         .await;
 
         let loop_ctx = Arc::new(ctx);
 
         if !self.is_loop_running.load(Ordering::Relaxed) {
-            loops::status::start(loop_ctx);
-
+            loops::status::start(loop_ctx.clone());
+            loops::gotd_loop::start(loop_ctx.clone());
             self.is_loop_running.swap(true, Ordering::Relaxed);
         }
     }
+
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match interaction {
@@ -61,6 +64,7 @@ impl EventHandler for Handler {
                     "ha" => (commands::hidden_ability::run(&command.data.options).await, false, vec![]),
                     "secret" => commands::secret::run(&command.data.options, &command.user),
                     "poe" => (commands::poe::run(&command.data.options, &self.config), false, vec![]),
+                    "gotd" => (commands::gotd::run(&command.data.options, &command.user), true, vec![]),
                     _ => ("not implemented :(".to_string(), true, vec![]),
                 };
 
@@ -143,6 +147,7 @@ impl EventHandler for Handler {
     }
 }
 
+
 #[tokio::main]
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
@@ -169,7 +174,6 @@ async fn main() {
         .expect("Error creating client");
 
     // Finally, start a single shard, and start listening to events.
-    //
     // Shards will automatically attempt to reconnect, and will perform
     // exponential backoff until it reconnects.
     if let Err(why) = client.start().await {

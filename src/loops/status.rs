@@ -6,10 +6,9 @@ use serenity::{prelude::Context, model::prelude::Activity};
 const STATUS_UPDATE_TIMER_SECS: u64 = 3600;
 
 pub fn start(ctx: Arc<Context>) {
-    let status_context = Arc::clone(&ctx);
     tokio::spawn(async move {
         loop {
-            set_status(Arc::clone(&status_context)).await;
+            set_status(Arc::clone(&ctx)).await;
             tokio::time::sleep(Duration::from_secs(STATUS_UPDATE_TIMER_SECS)).await;
         }
     });
