@@ -10,8 +10,8 @@ use rand::seq::SliceRandom;
 use tokio::task;
 
 
-const ADMIN_ID: u64 = 255117530253754378;
-// const ADMIN_ID: u64 = 248966803139723264; // Grif's ID
+// const ADMIN_ID: u64 = 255117530253754378; // My ID
+const ADMIN_ID: u64 = 248966803139723264; // Grif's ID
 const WEIGHTS: [f32; 3] = [0.0, 0.0, 0.5];
 const PREV_RELEVANT_EVENTS: usize = WEIGHTS.len();
 
