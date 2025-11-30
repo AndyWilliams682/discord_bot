@@ -6,6 +6,8 @@ use rand::{random, thread_rng};
 use rand::seq::SliceRandom;
 use tokio::task;
 
+use crate::database::DbPool;
+
 fn get_button_label(button_id: &str) -> &str {
     match button_id {
         "start_new_event" => "Create New Secret Santa Event",
@@ -75,10 +77,8 @@ fn get_latest_giftee(user_id: UserId, conn: &Connection) -> Result<String> {
 }
 
 
-pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User) -> Result<(String, Vec<String>)> {
-    // Move this to the main, shouldn't need to re-open every time?
-    let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let conn = Connection::open(db_file_path)?;
+pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User, pool: &DbPool) -> Result<(String, Vec<String>)> {
+    let conn = pool.get().map_err(|e| Error::QueryReturnedNoRows)?; // Map r2d2 error to rusqlite error or handle differently
     if invoker.id == ADMIN_ID { // Griffin's ID, runs hosting command WORK ON THIS NEXT
         return Ok((
             "Hello admin!".to_string(),
@@ -90,8 +90,8 @@ pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User) -> Result<(St
 }
 
 
-pub fn run(options: &[CommandDataOption], invoker: &User) -> CreateInteractionResponseMessage {
-    match run_wrapped(options, invoker) {
+pub fn run(options: &[CommandDataOption], invoker: &User, pool: &DbPool) -> CreateInteractionResponseMessage {
+    match run_wrapped(options, invoker, pool) {
         Ok((content, buttons)) => {
             let mut response = CreateInteractionResponseMessage::new().content(content).ephemeral(true);
             if !buttons.is_empty() {
@@ -122,20 +122,19 @@ fn current_year() -> i32 {
 }
 
 
-pub async fn start_new_event() -> CreateInteractionResponseMessage {
-    let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let res = match Connection::open(db_file_path) {
+pub async fn start_new_event(pool: &DbPool) -> CreateInteractionResponseMessage {
+    let res: Result<String, String> = match pool.get() {
         Ok(conn) => {
             let current_year = chrono::Local::now().year();
             if let Err(e) = conn.execute("INSERT INTO events (event_id) VALUES (?1)", params![current_year]) {
-                 Err(e)
+                 Err(e.to_string())
             } else if let Err(e) = conn.execute("INSERT INTO participation (event, user) VALUES (?1, ?2);", params![current_year, ADMIN_ID]) {
-                 Err(e)
+                 Err(e.to_string())
             } else {
                  Ok("New event has begun!".to_string())
             }
         },
-        Err(e) => Err(e)
+        Err(e) => Err(e.to_string())
     };
 
     match res {
@@ -168,10 +167,9 @@ pub fn is_event_open(conn: &Connection) -> Result<bool> {
 }
 
 
-pub fn toggle_event_participation(invoker: &User) -> CreateInteractionResponseMessage {
-    let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
+pub fn toggle_event_participation(invoker: &User, pool: &DbPool) -> CreateInteractionResponseMessage {
     let res: Result<String> = (|| {
-        let conn = Connection::open(db_file_path)?;
+        let conn = pool.get().map_err(|_| Error::QueryReturnedNoRows)?; // TODO: Better error handling
         if !is_event_open(&conn)? {
             return Ok("Unable to join - the names have already been drawn for this event.".to_string())
         }
@@ -225,9 +223,8 @@ pub fn toggle_event_participation(invoker: &User) -> CreateInteractionResponseMe
 
 // This exists to make the tokio code cleaner
 // Break this into smaller functions
-fn get_drawn_names() -> Result<Vec<(u64, u64)>> {
-    let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let conn = Connection::open(db_file_path)?;
+fn get_drawn_names(pool: &DbPool) -> Result<Vec<(u64, u64)>> {
+    let conn = pool.get().map_err(|_| Error::QueryReturnedNoRows)?;
     let mut prev_years_stmt = conn.prepare("
         SELECT event_id
         FROM events
@@ -294,9 +291,10 @@ fn get_drawn_names() -> Result<Vec<(u64, u64)>> {
 }
 
 
-pub async fn draw_names(ctx: &Context) -> CreateInteractionResponseMessage {
+pub async fn draw_names(ctx: &Context, pool: &DbPool) -> CreateInteractionResponseMessage {
+    let pool = pool.clone();
     let assignments_res = task::spawn_blocking(move || {
-        get_drawn_names()
+        get_drawn_names(&pool)
     }).await.expect("Failed to run database tasks");
 
     match assignments_res {

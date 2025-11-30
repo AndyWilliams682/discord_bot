@@ -12,6 +12,9 @@ use serenity::prelude::*;
 
 mod commands;
 mod loops;
+mod database;
+
+use database::{DbPoolWrapper, establish_connection};
 
 
 
@@ -39,8 +42,11 @@ impl EventHandler for Handler {
         let loop_ctx = Arc::new(ctx);
 
         if !self.is_loop_running.load(Ordering::Relaxed) {
+            let data = loop_ctx.data.read().await;
+            let pool = data.get::<DbPoolWrapper>().expect("Expected DbPool in TypeMap").clone();
+            
             loops::status::start(loop_ctx.clone());
-            loops::gotd_loop::start(loop_ctx.clone());
+            loops::gotd_loop::start(loop_ctx.clone(), pool);
             self.is_loop_running.swap(true, Ordering::Relaxed);
         }
     }
@@ -51,12 +57,15 @@ impl EventHandler for Handler {
             Interaction::Command(command) => {
                 println!("Received command interaction: {:#?}", command);
 
+                let data = ctx.data.read().await;
+                let pool = data.get::<DbPoolWrapper>().expect("Expected DbPool in TypeMap");
+
                 let response = match command.data.name.as_str() {
                     "ping" => commands::ping::run(&command.data.options),
                     "ha" => commands::hidden_ability::run(&command.data.options).await,
-                    "secret" => commands::secret::run(&command.data.options, &command.user),
+                    "secret" => commands::secret::run(&command.data.options, &command.user, pool),
                     "poe" => commands::poe::run(&command.data.options, &self.config),
-                    "gotd" => commands::gotd::run(&command.data.options, &command.user).await,
+                    "gotd" => commands::gotd::run(&command.data.options, &command.user, pool).await,
                     _ => CreateInteractionResponseMessage::new().content("not implemented :(").ephemeral(true),
                 };
 
@@ -70,10 +79,13 @@ impl EventHandler for Handler {
                 }
             },
             Interaction::Component(component) => {
+                let data = ctx.data.read().await;
+                let pool = data.get::<DbPoolWrapper>().expect("Expected DbPool in TypeMap");
+
                 let response = match component.data.custom_id.as_str() {
-                    "start_new_event" => commands::secret::start_new_event().await,
-                    "draw_names" => commands::secret::draw_names(&ctx).await,
-                    "toggle_event_participation" => commands::secret::toggle_event_participation(&component.user),
+                    "start_new_event" => commands::secret::start_new_event(pool).await,
+                    "draw_names" => commands::secret::draw_names(&ctx, pool).await,
+                    "toggle_event_participation" => commands::secret::toggle_event_participation(&component.user, pool),
                     _ => CreateInteractionResponseMessage::new().content("How did you even invoke this?").ephemeral(true)
                 };
 
@@ -117,6 +129,12 @@ async fn main() {
         })
         .await
         .expect("Error creating client");
+
+    {
+        let mut data = client.data.write().await;
+        let db_pool = establish_connection("/usr/local/bin/data/mtg_secret_santa.bin");
+        data.insert::<DbPoolWrapper>(Arc::new(db_pool));
+    }
 
     // Finally, start a single shard, and start listening to events.
     // Shards will automatically attempt to reconnect, and will perform

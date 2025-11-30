@@ -1,21 +1,23 @@
 use std::{sync::Arc, time::Duration};
 use serenity::all::{Context, UserId, GuildId, Mentionable, CreateMessage};
 use chrono::Local;
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Result, params};
+use crate::database::DbPool;
 
 const HOUR_TO_RUN: u32 = 17;
 const GUILD_ID: u64 = 323928878420590592; // 704782281578905670;
 const CHANNEL_NAME: &str = "gif-of-the-day"; // "test";
 
-pub fn start(ctx: Arc<Context>) {
+pub fn start(ctx: Arc<Context>, pool: Arc<DbPool>) {
     let gotd_context = Arc::clone(&ctx);
+    let pool = Arc::clone(&pool);
     tokio::spawn(async move {
         loop {
             let now = Local::now();
             let next = next_nine_am(now);
             let wait_dur = next.signed_duration_since(now).to_std().unwrap_or_else(|_| Duration::from_secs(0));
             tokio::time::sleep(wait_dur).await;
-            post_gotd(Arc::clone(&gotd_context)).await;
+            post_gotd(Arc::clone(&gotd_context), Arc::clone(&pool)).await;
         }
     });
 }
@@ -34,9 +36,8 @@ fn next_nine_am(now: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
 }
 
 
-fn select_random_gif() -> Result<(u64, String)> {
-    let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let conn = Connection::open(db_file_path)?;
+fn select_random_gif(pool: &DbPool) -> Result<(u64, String)> {
+    let conn = pool.get().map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
 
     let gif_stmt = "
         SELECT submitted_by, url
@@ -60,8 +61,8 @@ fn select_random_gif() -> Result<(u64, String)> {
     })
 }
 
-async fn post_gotd(ctx: Arc<Context>) {
-    let content = match select_random_gif() {
+async fn post_gotd(ctx: Arc<Context>, pool: Arc<DbPool>) {
+    let content = match select_random_gif(&pool) {
         Ok((submitter, url)) => format!("{} Submitted by {}", url, UserId::new(submitter).mention().to_string()),
         Err(e) => format!("Error posting GotD: {}", e)
     };

@@ -1,7 +1,8 @@
 use serenity::all::{CreateCommand, CreateCommandOption, CommandDataOption, CommandDataOptionValue, CommandOptionType, User, CreateInteractionResponseMessage};
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Result, params};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, Url};
+use crate::database::DbPool;
 
 
 async fn is_valid_url(s: &str) -> bool {
@@ -51,9 +52,8 @@ pub fn register() -> CreateCommand {
 }
 
 
-async fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
-    let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let conn = Connection::open(db_file_path)?;
+async fn run_wrapped(url: &str, invoker: &User, pool: &DbPool) -> Result<String> {
+    let conn = pool.get().map_err(|_| rusqlite::Error::QueryReturnedNoRows)?; // TODO: Better error handling
 
     conn.execute("
         INSERT OR IGNORE INTO users (user_id, username)
@@ -73,13 +73,13 @@ async fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
 }
 
 
-pub async fn run(options: &[CommandDataOption], invoker: &User) -> CreateInteractionResponseMessage {
+pub async fn run(options: &[CommandDataOption], invoker: &User, pool: &DbPool) -> CreateInteractionResponseMessage {
     let first_option = &options
         .get(0)
         .expect("Expected string option")
         .value;
     let content = if let CommandDataOptionValue::String(url) = first_option {
-        match run_wrapped(&url, invoker).await {
+        match run_wrapped(&url, invoker, pool).await {
             Ok(reply) => reply,
             Err(e) => format!("{}", e)
         }
