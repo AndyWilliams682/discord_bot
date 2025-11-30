@@ -1,10 +1,19 @@
-use serenity::all::{CreateCommand, CommandDataOption, UserId, User};
+use serenity::all::{CreateCommand, CommandDataOption, UserId, User, CreateInteractionResponseMessage, CreateActionRow, CreateButton, ButtonStyle};
 use serenity::prelude::*;
 use rusqlite::{Connection, Result, params, Error};
 use chrono::Datelike;
 use rand::{random, thread_rng};
 use rand::seq::SliceRandom;
 use tokio::task;
+
+fn get_button_label(button_id: &str) -> &str {
+    match button_id {
+        "start_new_event" => "Create New Secret Santa Event",
+        "draw_names" => "Draw Names",
+        "toggle_event_participation" => "Join (or Leave) Secret Santa",
+        _ => "How did you conjure this??"
+    }
+}
 
 
 // const ADMIN_ID: u64 = 255117530253754378; // My ID
@@ -81,10 +90,24 @@ pub fn run_wrapped(_options: &[CommandDataOption], invoker: &User) -> Result<(St
 }
 
 
-pub fn run(_options: &[CommandDataOption], invoker: &User) -> (String, bool, Vec<String>) {
-    match run_wrapped(_options, invoker) {
-        Ok(reply) => (reply.0, true, reply.1),
-        Err(e) => (format!("{}", e), true, vec![])
+pub fn run(options: &[CommandDataOption], invoker: &User) -> CreateInteractionResponseMessage {
+    match run_wrapped(options, invoker) {
+        Ok((content, buttons)) => {
+            let mut response = CreateInteractionResponseMessage::new().content(content).ephemeral(true);
+            if !buttons.is_empty() {
+                let mut row_buttons = Vec::new();
+                for button_id in buttons {
+                    row_buttons.push(
+                        CreateButton::new(button_id.clone())
+                            .style(ButtonStyle::Success)
+                            .label(get_button_label(&button_id))
+                    );
+                }
+                response = response.components(vec![CreateActionRow::Buttons(row_buttons)]);
+            }
+            response
+        },
+        Err(e) => CreateInteractionResponseMessage::new().content(format!("{}", e)).ephemeral(true)
     }
 }
 
@@ -99,19 +122,37 @@ fn current_year() -> i32 {
 }
 
 
-pub async fn start_new_event() -> Result<String> {
+pub async fn start_new_event() -> CreateInteractionResponseMessage {
     let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let conn = Connection::open(db_file_path)?;
-    let current_year = chrono::Local::now().year();
-    conn.execute("
-        INSERT INTO events (event_id) 
-        VALUES (?1)
-    ", params![current_year])?; // TODO: Better error handling?
-    conn.execute("
-        INSERT INTO participation (event, user)
-        VALUES (?1, ?2);
-    ", params![current_year, ADMIN_ID])?;
-    return Ok("New event has begun!".to_string()) // TODO: This might needs to also create a message with a button
+    let res = match Connection::open(db_file_path) {
+        Ok(conn) => {
+            let current_year = chrono::Local::now().year();
+            if let Err(e) = conn.execute("INSERT INTO events (event_id) VALUES (?1)", params![current_year]) {
+                 Err(e)
+            } else if let Err(e) = conn.execute("INSERT INTO participation (event, user) VALUES (?1, ?2);", params![current_year, ADMIN_ID]) {
+                 Err(e)
+            } else {
+                 Ok("New event has begun!".to_string())
+            }
+        },
+        Err(e) => Err(e)
+    };
+
+    match res {
+        Ok(content) => {
+             let buttons = vec!["toggle_event_participation"];
+             let mut row_buttons = Vec::new();
+             for button_id in buttons {
+                row_buttons.push(
+                    CreateButton::new(button_id)
+                        .style(ButtonStyle::Success)
+                        .label(get_button_label(button_id))
+                );
+             }
+             CreateInteractionResponseMessage::new().content(content).components(vec![CreateActionRow::Buttons(row_buttons)])
+        },
+        Err(e) => CreateInteractionResponseMessage::new().content(format!("{}", e)).ephemeral(true)
+    }
 }
 
 
@@ -127,50 +168,57 @@ pub fn is_event_open(conn: &Connection) -> Result<bool> {
 }
 
 
-pub fn toggle_event_participation(invoker: &User) -> Result<String> {
+pub fn toggle_event_participation(invoker: &User) -> CreateInteractionResponseMessage {
     let db_file_path = "/usr/local/bin/data/mtg_secret_santa.bin";
-    let conn = Connection::open(db_file_path)?;
-    if !is_event_open(&conn)? {
-        return Ok("Unable to join - the names have already been drawn for this event.".to_string())
-    }
-
-    conn.execute("
-        INSERT OR IGNORE INTO users (user_id, username)
-        VALUES (?1, ?2);
-    ", params![invoker.id.get(), invoker.name])?;
-    
-    let mut stmt = conn.prepare("
-        SELECT 1
-        FROM participation
-        WHERE user = ?1
-        LIMIT 1;
-    ")?;
-    let mut iter = stmt.query_map(params![invoker.id.get()], |_row| Ok(()))?;
-
-    let mut count_participants_stmt = conn.prepare("
-        SELECT COUNT(*)
-        FROM participation
-        WHERE event = ?1;
-    ")?;
-    let participant_count: i64 = count_participants_stmt.query_row(params![current_year()], |row| {
-        row.get(0)
-    })?;
-
-    return match iter.next().transpose()?.is_some() { // Checking if user is already in the event
-        true => {
-            conn.execute("
-                DELETE FROM participation
-                WHERE user = ?1 AND event = ?2
-            ", params![invoker.id.get(), current_year()])?;
-            Ok(format!("{} has left the event. {} has {} participants", invoker.mention(), current_year(), participant_count))
-        },
-        false => {
-            conn.execute("
-                INSERT INTO participation (event, user, user_giftee)
-                VALUES (?1, ?2, NULL);
-            ", params![current_year(), invoker.id.get()])?;
-            Ok(format!("{} has joined the event! {} has {} participants", invoker.mention(), current_year(), participant_count))
+    let res: Result<String> = (|| {
+        let conn = Connection::open(db_file_path)?;
+        if !is_event_open(&conn)? {
+            return Ok("Unable to join - the names have already been drawn for this event.".to_string())
         }
+
+        conn.execute("
+            INSERT OR IGNORE INTO users (user_id, username)
+            VALUES (?1, ?2);
+        ", params![invoker.id.get(), invoker.name])?;
+        
+        let mut stmt = conn.prepare("
+            SELECT 1
+            FROM participation
+            WHERE user = ?1
+            LIMIT 1;
+        ")?;
+        let mut iter = stmt.query_map(params![invoker.id.get()], |_row| Ok(()))?;
+
+        let mut count_participants_stmt = conn.prepare("
+            SELECT COUNT(*)
+            FROM participation
+            WHERE event = ?1;
+        ")?;
+        let participant_count: i64 = count_participants_stmt.query_row(params![current_year()], |row| {
+            row.get(0)
+        })?;
+
+        match iter.next().transpose()?.is_some() { // Checking if user is already in the event
+            true => {
+                conn.execute("
+                    DELETE FROM participation
+                    WHERE user = ?1 AND event = ?2
+                ", params![invoker.id.get(), current_year()])?;
+                Ok(format!("{} has left the event. {} has {} participants", invoker.mention(), current_year(), participant_count))
+            },
+            false => {
+                conn.execute("
+                    INSERT INTO participation (event, user, user_giftee)
+                    VALUES (?1, ?2, NULL);
+                ", params![current_year(), invoker.id.get()])?;
+                Ok(format!("{} has joined the event! {} has {} participants", invoker.mention(), current_year(), participant_count))
+            }
+        }
+    })();
+
+    match res {
+        Ok(content) => CreateInteractionResponseMessage::new().content(content),
+        Err(e) => CreateInteractionResponseMessage::new().content(format!("{}", e)).ephemeral(true)
     }
 }
 
@@ -246,23 +294,28 @@ fn get_drawn_names() -> Result<Vec<(u64, u64)>> {
 }
 
 
-pub async fn draw_names(ctx: &Context) -> Result<String> {
-    let assignments = task::spawn_blocking(move || {
+pub async fn draw_names(ctx: &Context) -> CreateInteractionResponseMessage {
+    let assignments_res = task::spawn_blocking(move || {
         get_drawn_names()
-    }).await.expect("Failed to run database tasks")?;
+    }).await.expect("Failed to run database tasks");
 
-    for &(participant_id, giftee_id) in assignments.iter() {
-        if let Ok(participant_user) = UserId::new(participant_id).to_user(&ctx.http).await {
-            let giftee_mention = UserId::new(giftee_id).mention().to_string();
-            let dm_message = format!("🎉 Your Secret Santa assignment for the {} event is {}! 🎉", current_year(), giftee_mention);
-            if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
-                if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {
-                    println!("Could not fetch Discord user object for ID {}: {}", participant_id, why);
+    match assignments_res {
+        Ok(assignments) => {
+            for &(participant_id, giftee_id) in assignments.iter() {
+                if let Ok(participant_user) = UserId::new(participant_id).to_user(&ctx.http).await {
+                    let giftee_mention = UserId::new(giftee_id).mention().to_string();
+                    let dm_message = format!("🎉 Your Secret Santa assignment for the {} event is {}! 🎉", current_year(), giftee_mention);
+                    if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
+                        if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {
+                            println!("Could not fetch Discord user object for ID {}: {}", participant_id, why);
+                        }
+                    }
+                } else {
+                    println!("Could not fetch Discord user object for ID {}", participant_id);
                 }
             }
-        } else {
-            println!("Could not fetch Discord user object for ID {}", participant_id);
-        }
+            CreateInteractionResponseMessage::new().content("Names have been drawn! Check your DMs")
+        },
+        Err(e) => CreateInteractionResponseMessage::new().content(format!("{}", e)).ephemeral(true)
     }
-    Ok("Names have been drawn! Check your DMs".to_string())
 }

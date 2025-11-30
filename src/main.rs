@@ -5,22 +5,15 @@ use std::{env, fs};
 
 use serenity::async_trait;
 use serenity::all::{
-    Command, Interaction, Ready, ButtonStyle,
-    CreateInteractionResponse, CreateInteractionResponseMessage, CreateActionRow, CreateButton
+    Command, Interaction, Ready,
+    CreateCommand, CreateInteractionResponse, CreateInteractionResponseMessage
 };
 use serenity::prelude::*;
 
 mod commands;
 mod loops;
 
-fn get_button_label(button_id: &str) -> &str {
-    match button_id {
-        "start_new_event" => "Create New Secret Santa Event",
-        "draw_names" => "Draw Names",
-        "toggle_event_participation" => "Join (or Leave) Secret Santa",
-        _ => "How did you conjure this??"
-    }
-}
+
 
 
 struct Handler {
@@ -58,35 +51,18 @@ impl EventHandler for Handler {
             Interaction::Command(command) => {
                 println!("Received command interaction: {:#?}", command);
 
-                let (content, is_ephemeral, shown_button_ids) = match command.data.name.as_str() {
-                    "ping" => (commands::ping::run(&command.data.options), false, vec![]),
-                    "ha" => (commands::hidden_ability::run(&command.data.options).await, false, vec![]),
+                let response = match command.data.name.as_str() {
+                    "ping" => commands::ping::run(&command.data.options),
+                    "ha" => commands::hidden_ability::run(&command.data.options).await,
                     "secret" => commands::secret::run(&command.data.options, &command.user),
-                    "poe" => (commands::poe::run(&command.data.options, &self.config), false, vec![]),
-                    "gotd" => (commands::gotd::run(&command.data.options, &command.user).await, true, vec![]),
-                    _ => ("not implemented :(".to_string(), true, vec![]),
+                    "poe" => commands::poe::run(&command.data.options, &self.config),
+                    "gotd" => commands::gotd::run(&command.data.options, &command.user).await,
+                    _ => CreateInteractionResponseMessage::new().content("not implemented :(").ephemeral(true),
                 };
-
-                let mut response_data = CreateInteractionResponseMessage::new()
-                    .content(content)
-                    .ephemeral(is_ephemeral);
-
-                if shown_button_ids.len() > 0 {
-                    let mut buttons = Vec::new();
-                    for button_id in &shown_button_ids {
-                        buttons.push(
-                            CreateButton::new(button_id.clone())
-                                .style(ButtonStyle::Success)
-                                .label(get_button_label(button_id))
-                        );
-                    }
-                    let row = CreateActionRow::Buttons(buttons);
-                    response_data = response_data.components(vec![row]);
-                }
 
                 if let Err(why) = command
                     .create_response(&ctx.http, 
-                        CreateInteractionResponse::Message(response_data)
+                        CreateInteractionResponse::Message(response)
                     )
                     .await
                 {
@@ -94,39 +70,17 @@ impl EventHandler for Handler {
                 }
             },
             Interaction::Component(component) => {
-                let (follow_up_result, is_ephemeral, follow_up_buttons) = match component.data.custom_id.as_str() {
-                    "start_new_event" => (commands::secret::start_new_event().await, false, vec!["toggle_event_participation"]),
-                    "draw_names" => (commands::secret::draw_names(&ctx).await, false, vec![]),
-                    "toggle_event_participation" => (commands::secret::toggle_event_participation(&component.user), false, vec![]),
-                    _ => (Ok("How did you even invoke this?".to_string()), true, vec![])
+                let response = match component.data.custom_id.as_str() {
+                    "start_new_event" => commands::secret::start_new_event().await,
+                    "draw_names" => commands::secret::draw_names(&ctx).await,
+                    "toggle_event_participation" => commands::secret::toggle_event_participation(&component.user),
+                    _ => CreateInteractionResponseMessage::new().content("How did you even invoke this?").ephemeral(true)
                 };
-
-                let (follow_up_response, is_ephemeral, follow_up_buttons) = match follow_up_result {
-                    Ok(resp) => (resp, is_ephemeral, follow_up_buttons),
-                    Err(e) => (format!("{}", e), true, vec![])
-                };
-    
-                let mut response_data = CreateInteractionResponseMessage::new()
-                    .content(follow_up_response)
-                    .ephemeral(is_ephemeral);
-
-                if follow_up_buttons.len() > 0 {
-                    let mut buttons = Vec::new();
-                    for button_id in &follow_up_buttons {
-                        buttons.push(
-                            CreateButton::new(*button_id)
-                                .style(ButtonStyle::Success)
-                                .label(get_button_label(button_id))
-                        );
-                    }
-                    let row = CreateActionRow::Buttons(buttons);
-                    response_data = response_data.components(vec![row]);
-                }
 
                 // Respond to the button press interaction
                 if let Err(why) = component
                     .create_response(&ctx.http, 
-                        CreateInteractionResponse::Message(response_data)
+                        CreateInteractionResponse::Message(response)
                     )
                     .await
                 {

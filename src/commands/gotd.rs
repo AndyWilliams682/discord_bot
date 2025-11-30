@@ -1,4 +1,4 @@
-use serenity::all::{CreateCommand, CreateCommandOption, CommandDataOption, CommandDataOptionValue, CommandOptionType, User};
+use serenity::all::{CreateCommand, CreateCommandOption, CommandDataOption, CommandDataOptionValue, CommandOptionType, User, CreateInteractionResponseMessage};
 use rusqlite::{Connection, Result, params};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, Url};
@@ -73,17 +73,18 @@ async fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
 }
 
 
-pub async fn run(options: &[CommandDataOption], invoker: &User) -> String {
+pub async fn run(options: &[CommandDataOption], invoker: &User) -> CreateInteractionResponseMessage {
     let first_option = &options
         .get(0)
         .expect("Expected string option")
         .value;
-    if let CommandDataOptionValue::String(url) = first_option {
+    let content = if let CommandDataOptionValue::String(url) = first_option {
         match run_wrapped(&url, invoker).await {
             Ok(reply) => reply,
             Err(e) => format!("{}", e)
         }
     } else {
         "How did you input a non-string?".to_string()
-    }
+    };
+    CreateInteractionResponseMessage::new().content(content).ephemeral(true)
 }

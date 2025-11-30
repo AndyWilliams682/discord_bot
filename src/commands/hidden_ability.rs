@@ -1,18 +1,19 @@
 use std::fmt;
 use regex::Regex;
-use serenity::all::{CreateCommand, CreateCommandOption, CommandOptionType, CommandDataOptionValue, CommandDataOption};
+use serenity::all::{CreateCommand, CreateCommandOption, CommandOptionType, CommandDataOptionValue, CommandDataOption, CreateInteractionResponseMessage};
 use serde_json::Value;
 
 const MIN_CHARS: usize = 3; // Shortest name is "Mew"
 const MAX_CHARS: usize = 25; // arbitrary maximum
 const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 
-pub async fn run(options: &[CommandDataOption]) -> String {
+pub async fn run(options: &[CommandDataOption]) -> CreateInteractionResponseMessage {
     let option = &options
         .get(0)
         .expect("Expected string option")
         .value;
-    get_pokemon_ha_from_api(option).await
+    let content = get_pokemon_ha_from_api(option).await;
+    CreateInteractionResponseMessage::new().content(content)
 }
 
 pub fn register() -> CreateCommand {

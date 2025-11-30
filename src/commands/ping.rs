@@ -1,7 +1,7 @@
-use serenity::all::{CreateCommand, CommandDataOption};
+use serenity::all::{CreateCommand, CommandDataOption, CreateInteractionResponseMessage};
 
-pub fn run(_options: &[CommandDataOption]) -> String {
-    "Hey, I'm alive!".to_string()
+pub fn run(_options: &[CommandDataOption]) -> CreateInteractionResponseMessage {
+    CreateInteractionResponseMessage::new().content("Hey, I'm alive!")
 }
 
 pub fn register() -> CreateCommand {
