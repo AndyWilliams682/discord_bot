@@ -1,7 +1,4 @@
-use serenity::builder::CreateApplicationCommand;
-use serenity::model::prelude::interaction::application_command::CommandDataOption;
-use serenity::model::id::UserId;
-use serenity::model::user::User;
+use serenity::all::{CreateCommand, CommandDataOption, UserId, User};
 use serenity::prelude::*;
 use rusqlite::{Connection, Result, params, Error};
 use chrono::Datelike;
@@ -52,13 +49,13 @@ fn get_latest_giftee(user_id: UserId, conn: &Connection) -> Result<String> {
         )
     ")?;
 
-    let result: Result<i64, Error> = stmt.query_row(params![user_id.as_u64()], |row| {
+    let result: Result<i64, Error> = stmt.query_row(params![user_id.get()], |row| {
         row.get(0)
     });
 
     match result {
         Ok(giftee_id) => {
-            let uid = UserId(giftee_id as u64);
+            let uid = UserId::new(giftee_id as u64);
             Ok(format!("Your giftee is: {}", uid.mention().to_string()))
         }
         Err(rusqlite::Error::QueryReturnedNoRows) => {
@@ -92,8 +89,8 @@ pub fn run(_options: &[CommandDataOption], invoker: &User) -> (String, bool, Vec
 }
 
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command.name("secret").description("See your recipient for secret santa!")
+pub fn register() -> CreateCommand {
+    CreateCommand::new("secret").description("See your recipient for secret santa!")
 }
 
 
@@ -140,7 +137,7 @@ pub fn toggle_event_participation(invoker: &User) -> Result<String> {
     conn.execute("
         INSERT OR IGNORE INTO users (user_id, username)
         VALUES (?1, ?2);
-    ", params![invoker.id.as_u64(), invoker.name])?;
+    ", params![invoker.id.get(), invoker.name])?;
     
     let mut stmt = conn.prepare("
         SELECT 1
@@ -148,7 +145,7 @@ pub fn toggle_event_participation(invoker: &User) -> Result<String> {
         WHERE user = ?1
         LIMIT 1;
     ")?;
-    let mut iter = stmt.query_map(params![invoker.id.as_u64()], |_row| Ok(()))?;
+    let mut iter = stmt.query_map(params![invoker.id.get()], |_row| Ok(()))?;
 
     let mut count_participants_stmt = conn.prepare("
         SELECT COUNT(*)
@@ -164,14 +161,14 @@ pub fn toggle_event_participation(invoker: &User) -> Result<String> {
             conn.execute("
                 DELETE FROM participation
                 WHERE user = ?1 AND event = ?2
-            ", params![invoker.id.as_u64(), current_year()])?;
+            ", params![invoker.id.get(), current_year()])?;
             Ok(format!("{} has left the event. {} has {} participants", invoker.mention(), current_year(), participant_count))
         },
         false => {
             conn.execute("
                 INSERT INTO participation (event, user, user_giftee)
                 VALUES (?1, ?2, NULL);
-            ", params![current_year(), invoker.id.as_u64()])?;
+            ", params![current_year(), invoker.id.get()])?;
             Ok(format!("{} has joined the event! {} has {} participants", invoker.mention(), current_year(), participant_count))
         }
     }
@@ -255,8 +252,8 @@ pub async fn draw_names(ctx: &Context) -> Result<String> {
     }).await.expect("Failed to run database tasks")?;
 
     for &(participant_id, giftee_id) in assignments.iter() {
-        if let Ok(participant_user) = UserId(participant_id).to_user(&ctx.http).await {
-            let giftee_mention = UserId(giftee_id).mention().to_string();
+        if let Ok(participant_user) = UserId::new(participant_id).to_user(&ctx.http).await {
+            let giftee_mention = UserId::new(giftee_id).mention().to_string();
             let dm_message = format!("🎉 Your Secret Santa assignment for the {} event is {}! 🎉", current_year(), giftee_mention);
             if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
                 if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {

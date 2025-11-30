@@ -1,18 +1,14 @@
-use serenity::builder::CreateApplicationCommand;
-use serenity::model::application::command::CommandOptionType;
-use serenity::model::application::interaction::application_command::{CommandDataOption, CommandDataOptionValue};
+use serenity::all::{CreateCommand, CreateCommandOption, CommandOptionType, CommandDataOption, CommandDataOptionValue};
 use std::collections::HashMap;
 
 pub fn run(options: &[CommandDataOption], config: &HashMap<String, String>) -> String {
-    let option = options
+    let option = &options
         .get(0)
         .expect("Expected user option")
-        .resolved
-        .as_ref()
-        .expect("Expected user object");
+        .value;
 
-    if let CommandDataOptionValue::User(user, _member) = option {
-        if let Some(account) =  config.get(&user.id.to_string()) {
+    if let CommandDataOptionValue::User(user_id) = option {
+        if let Some(account) =  config.get(&user_id.to_string()) {
             format!("https://www.pathofexile.com/account/view-profile/{}/characters", account)
         } else {
             "This user does not have an account linked".to_string()
@@ -22,12 +18,11 @@ pub fn run(options: &[CommandDataOption], config: &HashMap<String, String>) -> S
     }
 }
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command.name("poe").description("Get a link to the user's poe characters").create_option(|option| {
-        option
-            .name("id")
-            .description("The user to lookup")
-            .kind(CommandOptionType::User)
-            .required(true)
-    })
+pub fn register() -> CreateCommand {
+    CreateCommand::new("poe")
+        .description("Get a link to the user's poe characters")
+        .add_option(
+            CreateCommandOption::new(CommandOptionType::User, "id", "The user to lookup")
+                .required(true)
+        )
 }

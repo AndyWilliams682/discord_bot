@@ -1,11 +1,7 @@
 use std::{sync::Arc, time::Duration};
-
-use serenity::prelude::Context;
+use serenity::all::{Context, UserId, GuildId, Mentionable, CreateMessage};
 use chrono::Local;
 use rusqlite::{Connection, Result, params};
-use serenity::model::id::UserId;
-use serenity::model::prelude::GuildId;
-use serenity::prelude::Mentionable;
 
 const HOUR_TO_RUN: u32 = 17;
 const GUILD_ID: u64 = 323928878420590592; // 704782281578905670;
@@ -26,13 +22,14 @@ pub fn start(ctx: Arc<Context>) {
 
 
 fn next_nine_am(now: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
-    let today_nine = now.date().and_hms_opt(HOUR_TO_RUN, 0, 0)
-        .unwrap_or_else(|| now.date().and_hms_opt(HOUR_TO_RUN, 0, 0).unwrap());
+    let today_nine = now.date_naive().and_hms_opt(HOUR_TO_RUN, 0, 0)
+        .unwrap_or_else(|| now.date_naive().and_hms_opt(HOUR_TO_RUN, 0, 0).unwrap())
+        .and_local_timezone(Local).unwrap();
     if now < today_nine {
         today_nine
     } else {
-        let next_day = now.date().succ_opt().unwrap_or_else(|| now.date() + chrono::Duration::days(1));
-        next_day.and_hms_opt(HOUR_TO_RUN, 0, 0).unwrap()
+        let next_day = now.date_naive().succ_opt().unwrap_or_else(|| now.date_naive() + chrono::Duration::days(1));
+        next_day.and_hms_opt(HOUR_TO_RUN, 0, 0).unwrap().and_local_timezone(Local).unwrap()
     }
 }
 
@@ -63,16 +60,15 @@ fn select_random_gif() -> Result<(u64, String)> {
     })
 }
 
-
 async fn post_gotd(ctx: Arc<Context>) {
     let content = match select_random_gif() {
-        Ok((submitter, url)) => format!("{} Submitted by {}", url, UserId(submitter).mention().to_string()),
+        Ok((submitter, url)) => format!("{} Submitted by {}", url, UserId::new(submitter).mention().to_string()),
         Err(e) => format!("Error posting GotD: {}", e)
     };
-    if let Ok(channels) = GuildId(GUILD_ID).channels(&ctx.http).await {
+    if let Ok(channels) = GuildId::new(GUILD_ID).channels(&ctx.http).await {
         if let Some((id, _channel)) = channels.into_iter().find(|(_id, channel)| channel.name == CHANNEL_NAME) {
-            if let Err(err) = id.send_message(&ctx.http, |m| m.content(&content)).await {
-                println!("Failed to send GOTD message to channel {}: {:?}", id.0, err);
+            if let Err(err) = id.send_message(&ctx.http, CreateMessage::new().content(&content)).await {
+                println!("Failed to send GOTD message to channel {}: {:?}", id.get(), err);
             }
         } else {
             println!("Channel {} not found in guild {}", CHANNEL_NAME, GUILD_ID);

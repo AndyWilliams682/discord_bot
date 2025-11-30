@@ -1,8 +1,5 @@
-use serenity::{builder::CreateApplicationCommand};
+use serenity::all::{CreateCommand, CreateCommandOption, CommandDataOption, CommandDataOptionValue, CommandOptionType, User};
 use rusqlite::{Connection, Result, params};
-use serenity::model::user::User;
-use serenity::model::prelude::interaction::application_command::{CommandDataOption, CommandDataOptionValue};
-use serenity::model::prelude::command::CommandOptionType;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, Url};
 
@@ -44,16 +41,13 @@ async fn is_valid_url(s: &str) -> bool {
 }
 
 
-pub fn register(command: &mut CreateApplicationCommand) -> &mut CreateApplicationCommand {
-    command.name("gotd")
+pub fn register() -> CreateCommand {
+    CreateCommand::new("gotd")
         .description("Submit a url for for gif of the day")
-        .create_option(|option| {
-            option
-                .name("url")
-                .description("The url of your gif")
-                .kind(CommandOptionType::String)
+        .add_option(
+            CreateCommandOption::new(CommandOptionType::String, "url", "The url of your gif")
                 .required(true)
-        })
+        )
 }
 
 
@@ -64,14 +58,14 @@ async fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
     conn.execute("
         INSERT OR IGNORE INTO users (user_id, username)
         VALUES (?1, ?2);
-    ", params![invoker.id.as_u64(), invoker.name])?;
+    ", params![invoker.id.get(), invoker.name])?;
 
     return match is_valid_url(&url).await {
         true => {
             conn.execute("
                 INSERT INTO gifs (submitted_by, url, posts)
                 VALUES (?1, ?2, 0);
-            ", params![invoker.id.as_u64(), url])?;
+            ", params![invoker.id.get(), url])?;
             Ok("Gif added, thank you!".to_string())
         },
         false => Ok("Your url does not appear to be valid".to_string())
@@ -80,14 +74,12 @@ async fn run_wrapped(url: &str, invoker: &User) -> Result<String> {
 
 
 pub async fn run(options: &[CommandDataOption], invoker: &User) -> String {
-    let first_option = options
+    let first_option = &options
         .get(0)
         .expect("Expected string option")
-        .resolved
-        .as_ref()
-        .expect("Expected string object");
+        .value;
     if let CommandDataOptionValue::String(url) = first_option {
-        match run_wrapped(url, invoker).await {
+        match run_wrapped(&url, invoker).await {
             Ok(reply) => reply,
             Err(e) => format!("{}", e)
         }

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use rand::{distributions::WeightedIndex, rngs::StdRng, SeedableRng, prelude::Distribution};
-use serenity::{prelude::Context, model::prelude::Activity};
+use serenity::{prelude::Context, gateway::ActivityData};
 
 const STATUS_UPDATE_TIMER_SECS: u64 = 3600;
 
@@ -32,5 +32,5 @@ async fn set_status(ctx: Arc<Context>) {
 
     let status_choice = status_options[dist.sample(&mut rng)];
 
-    ctx.set_activity(Activity::playing(&status_choice)).await;
+    ctx.set_activity(Some(ActivityData::playing(status_choice)));
 }

@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::{env, fs};
 
 use serenity::async_trait;
-use serenity::model::application::command::Command;
-use serenity::model::application::interaction::{Interaction, InteractionResponseType};
-use serenity::model::gateway::Ready;
+use serenity::all::{
+    Command, Interaction, Ready, ButtonStyle,
+    CreateInteractionResponse, CreateInteractionResponseMessage, CreateActionRow, CreateButton
+};
 use serenity::prelude::*;
-use serenity::model::application::component::ButtonStyle;
 
 mod commands;
 mod loops;
@@ -34,14 +34,13 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
-        let _global_command = Command::set_global_application_commands(&ctx.http, |commands| {
-            commands
-                .create_application_command(|command| commands::ping::register(command))
-                .create_application_command(|command| commands::hidden_ability::register(command))
-                .create_application_command(|command| commands::secret::register(command))
-                .create_application_command(|command| commands::poe::register(command))
-                .create_application_command(|command| commands::gotd::register(command))
-        })
+        let _global_command = Command::set_global_commands(&ctx.http, vec![
+            commands::ping::register(),
+            commands::hidden_ability::register(),
+            commands::secret::register(),
+            commands::poe::register(),
+            commands::gotd::register(),
+        ])
         .await;
 
         let loop_ctx = Arc::new(ctx);
@@ -56,7 +55,7 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match interaction {
-            Interaction::ApplicationCommand(command) => {
+            Interaction::Command(command) => {
                 println!("Received command interaction: {:#?}", command);
 
                 let (content, is_ephemeral, shown_button_ids) = match command.data.name.as_str() {
@@ -68,37 +67,33 @@ impl EventHandler for Handler {
                     _ => ("not implemented :(".to_string(), true, vec![]),
                 };
 
-                if let Err(why) = command
-                    .create_interaction_response(&ctx.http, |response| {
-                        response
-                            .kind(InteractionResponseType::ChannelMessageWithSource)
-                            .interaction_response_data(|message| {
-                                message.content(content).ephemeral(is_ephemeral);
+                let mut response_data = CreateInteractionResponseMessage::new()
+                    .content(content)
+                    .ephemeral(is_ephemeral);
 
-                                if shown_button_ids.len() > 0 {
-                                    message.components(|components| {
-                                        components.create_action_row(|row| {
-                                            for button_id in &shown_button_ids {
-                                                row.create_button(|button| {
-                                                    button.style(ButtonStyle::Success)
-                                                        .label(get_button_label(button_id))
-                                                        .custom_id(button_id)
-                                                });
-                                            }
-                                            row
-                                        });
-                                        components
-                                    });
-                                }
-                                message
-                            })
-                    })
+                if shown_button_ids.len() > 0 {
+                    let mut buttons = Vec::new();
+                    for button_id in &shown_button_ids {
+                        buttons.push(
+                            CreateButton::new(button_id.clone())
+                                .style(ButtonStyle::Success)
+                                .label(get_button_label(button_id))
+                        );
+                    }
+                    let row = CreateActionRow::Buttons(buttons);
+                    response_data = response_data.components(vec![row]);
+                }
+
+                if let Err(why) = command
+                    .create_response(&ctx.http, 
+                        CreateInteractionResponse::Message(response_data)
+                    )
                     .await
                 {
                     println!("Cannot respond to slash command: {}", why);
                 }
             },
-            Interaction::MessageComponent(component) => {
+            Interaction::Component(component) => {
                 let (follow_up_result, is_ephemeral, follow_up_buttons) = match component.data.custom_id.as_str() {
                     "start_new_event" => (commands::secret::start_new_event().await, false, vec!["toggle_event_participation"]),
                     "draw_names" => (commands::secret::draw_names(&ctx).await, false, vec![]),
@@ -111,32 +106,28 @@ impl EventHandler for Handler {
                     Err(e) => (format!("{}", e), true, vec![])
                 };
     
+                let mut response_data = CreateInteractionResponseMessage::new()
+                    .content(follow_up_response)
+                    .ephemeral(is_ephemeral);
+
+                if follow_up_buttons.len() > 0 {
+                    let mut buttons = Vec::new();
+                    for button_id in &follow_up_buttons {
+                        buttons.push(
+                            CreateButton::new(*button_id)
+                                .style(ButtonStyle::Success)
+                                .label(get_button_label(button_id))
+                        );
+                    }
+                    let row = CreateActionRow::Buttons(buttons);
+                    response_data = response_data.components(vec![row]);
+                }
+
                 // Respond to the button press interaction
                 if let Err(why) = component
-                    .create_interaction_response(&ctx.http, |response| {
-                        response
-                            .kind(InteractionResponseType::ChannelMessageWithSource)
-                            .interaction_response_data(|message| {
-                                // Use an ephemeral response for a "secret" follow-up
-                                message.content(follow_up_response).ephemeral(is_ephemeral);
-                                if follow_up_buttons.len() > 0 {
-                                    message.components(|components| {
-                                        components.create_action_row(|row| {
-                                            for button_id in &follow_up_buttons {
-                                                row.create_button(|button| {
-                                                    button.style(ButtonStyle::Success)
-                                                        .label(get_button_label(button_id))
-                                                        .custom_id(button_id)
-                                                });
-                                            }
-                                            row
-                                        });
-                                        components
-                                    });
-                                }
-                                message
-                            })
-                    })
+                    .create_response(&ctx.http, 
+                        CreateInteractionResponse::Message(response_data)
+                    )
                     .await
                 {
                     println!("Cannot respond to secret button press: {}", why);
