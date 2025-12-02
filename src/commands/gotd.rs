@@ -2,7 +2,67 @@ use serenity::all::{CreateCommand, CreateCommandOption, CommandDataOption, Comma
 use rusqlite::{Result, params};
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, Url};
+use async_trait::async_trait;
+
 use crate::database::DbPool;
+
+
+#[async_trait]
+pub trait GotdRepository: Send + Sync {
+    async fn submit_gif(&self, user_id: u64, username: String, url: String) -> Result<(), String>;
+}
+
+pub struct GotdRepositoryImpl {
+    pool: DbPool,
+}
+
+impl GotdRepositoryImpl {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl GotdRepository for GotdRepositoryImpl {
+    async fn submit_gif(&self, user_id: u64, username: String, url: String) -> Result<(), String> {
+        let pool_clone = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool_clone.get().map_err(|e| e.to_string())?;
+            
+            conn.execute("
+                INSERT OR IGNORE INTO users (user_id, username)
+                VALUES (?1, ?2);
+            ", params![user_id, username]).map_err(|e| e.to_string())?;
+
+            conn.execute("
+                INSERT INTO gifs (submitted_by, url, posts)
+                VALUES (?1, ?2, 0);
+            ", params![user_id, url]).map_err(|e| e.to_string())?;
+            
+            Ok(())
+        }).await.map_err(|e| e.to_string())?
+    }
+}
+
+pub async fn submit_gif_logic(
+    url: String, 
+    invoker_id: u64, 
+    invoker_name: String, 
+    repo: &impl GotdRepository
+) -> String {
+    
+    if !is_valid_url(&url).await {
+        return "Invalid URL".to_string();
+    }
+
+    match repo.submit_gif(invoker_id, invoker_name, url).await {
+        Ok(_) => "Gif added, thank you!".to_string(),
+        Err(e) => {
+            println!("Database error during gif submission: {}", e);
+            "Database operation failed.".to_string()
+        }
+    }
+}
 
 
 async fn is_valid_url(s: &str) -> bool {
@@ -51,38 +111,11 @@ pub fn register() -> CreateCommand {
         )
 }
 
-
-async fn run_wrapped(url: &str, invoker: &User, pool: &DbPool) -> Result<String> {
-    let conn = pool.get().map_err(|_| rusqlite::Error::QueryReturnedNoRows)?; // TODO: Better error handling
-
-    conn.execute("
-        INSERT OR IGNORE INTO users (user_id, username)
-        VALUES (?1, ?2);
-    ", params![invoker.id.get(), invoker.name])?;
-
-    return match is_valid_url(&url).await {
-        true => {
-            conn.execute("
-                INSERT INTO gifs (submitted_by, url, posts)
-                VALUES (?1, ?2, 0);
-            ", params![invoker.id.get(), url])?;
-            Ok("Gif added, thank you!".to_string())
-        },
-        false => Ok("Your url does not appear to be valid".to_string())
-    }
-}
-
-
 pub async fn run(options: &[CommandDataOption], invoker: &User, pool: &DbPool) -> CreateInteractionResponseMessage {
-    let first_option = &options
-        .get(0)
-        .expect("Expected string option")
-        .value;
-    let content = if let CommandDataOptionValue::String(url) = first_option {
-        match run_wrapped(&url, invoker, pool).await {
-            Ok(reply) => reply,
-            Err(e) => format!("{}", e)
-        }
+    let url_option = &options.get(0).expect("Expected string option").value;
+    let repo = GotdRepositoryImpl::new(pool.clone());
+    let content = if let CommandDataOptionValue::String(url) = url_option {
+        submit_gif_logic(url.clone(), invoker.id.get(), invoker.name.clone(), &repo).await
     } else {
         "How did you input a non-string?".to_string()
     };
