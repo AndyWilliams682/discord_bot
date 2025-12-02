@@ -8,7 +8,7 @@ pub fn run(options: &[CommandDataOption], config: &HashMap<String, String>) -> C
         .value;
 
     let content = if let CommandDataOptionValue::User(user_id) = requested_user {
-        get_response_content(user_id, config)
+        get_response_content(user_id.get(), config)
     } else {
         "Please provide a valid user".to_string()
     };
