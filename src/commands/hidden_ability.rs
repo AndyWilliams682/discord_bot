@@ -7,13 +7,89 @@ const MIN_CHARS: usize = 3; // Shortest name is "Mew"
 const MAX_CHARS: usize = 25; // arbitrary maximum
 const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 
+
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait PokeAPIService {
+    async fn get_hidden_ability(&self, api_name: &str) -> Result<String, String>;
+}
+
+pub struct RealPokeAPIService;
+
+impl RealPokeAPIService {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn extract_hidden_ability(parsed_json: &Value) -> String {
+        let abilities: &Vec<Value> = parsed_json["abilities"].as_array().unwrap();
+        let mut hidden_ability: String = NO_HIDDEN_ABILITY.to_string();
+        for ability in abilities {
+            if ability["is_hidden"] == true {
+                hidden_ability = ability["ability"]["name"].as_str().unwrap().to_string();
+            }
+        }
+        hidden_ability
+    }
+}
+
+#[async_trait]
+impl PokeAPIService for RealPokeAPIService {
+    async fn get_hidden_ability(&self, api_name: &str) -> Result<String, String> {
+        let url = format!("https://pokeapi.co/api/v2/pokemon/{}", api_name);
+        let response = match reqwest::get(&url).await {
+            Ok(res) => res,
+            Err(e) => return Err(format!("{:?}", e))
+        };
+
+        match response.status() {
+            reqwest::StatusCode::OK => {
+                match response.json::<Value>().await {
+                    Ok(parsed) => Ok(RealPokeAPIService::extract_hidden_ability(&parsed)),
+                    Err(e) => Err(format!("{:?}", e))
+                }
+            }
+            status_code => Err(format!("{:?}", status_code))
+        }
+    }
+}
+
+
+pub async fn get_hidden_abilities(pokemon_list: Vec<&str>, api_service: &impl PokeAPIService) -> String {
+    let mut output: String = "".to_string();
+    for input_name in pokemon_list {
+        let api_name = match PokeAPIName::parse(input_name.to_string()) {
+            Ok(api_name) => api_name,
+            Err(why) => {
+                output.push_str(&format!("{}: {}\n", input_name, why));
+                continue
+            }
+        };
+        match api_service.get_hidden_ability(api_name.as_ref()).await {
+            Ok(api_output) => output.push_str(&format!("{}: {}\n", api_name, &api_output)),
+            Err(err) => output.push_str(&format!("{}: {:?}\n", api_name, err))
+        }
+    }
+    output.to_string()
+}
+
+
 pub async fn run(options: &[CommandDataOption]) -> CreateInteractionResponseMessage {
-    let option = &options
+    if let CommandDataOptionValue::String(raw_input) = &options
         .get(0)
         .expect("Expected string option")
-        .value;
-    let content = get_pokemon_ha_from_api(option).await;
-    CreateInteractionResponseMessage::new().content(content)
+        .value {
+            let pokemon_list = raw_input.split(", ").collect::<Vec<&str>>();
+            let api_service = RealPokeAPIService::new();
+            let mut content = get_hidden_abilities(pokemon_list, &api_service).await;
+            if content.len() == 0 {
+                content = format!("Your input \"{}\" has no valid pokemon", raw_input)
+            }
+            CreateInteractionResponseMessage::new().content(content)
+        } else {
+            CreateInteractionResponseMessage::new().content("How did you input a non-string?")
+        }
 }
 
 pub fn register() -> CreateCommand {
@@ -62,54 +138,6 @@ impl AsRef<str> for PokeAPIName {
 impl fmt::Display for PokeAPIName {
     fn fmt (&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-pub async fn get_pokemon_ha_from_api (command: &CommandDataOptionValue) -> String {
-    if let CommandDataOptionValue::String(string) = command {
-        let split = string.split(", ");
-
-        let mut output: String = "".to_owned();
-
-        for input_name in split {
-            let api_name = match PokeAPIName::parse(input_name.to_owned()) {
-                Ok(api_name) => api_name,
-                Err(why) => {
-                    output.push_str(&why);
-                    continue
-                }
-            };
-
-            let url = format!("https://pokeapi.co/api/v2/pokemon/{}", api_name);
-            let response = reqwest::get(&url).await.unwrap();
-            let input_pokemon_ability = match response.status() {
-                reqwest::StatusCode::OK => {
-                    match response.json::<Value>().await {
-                        Ok(parsed) => {
-                            let abilities: &Vec<Value> = parsed["abilities"].as_array().unwrap();
-                            let mut hidden_ability: String = NO_HIDDEN_ABILITY.to_string();
-                            for ability in abilities {
-                                if ability["is_hidden"] == true {
-                                    hidden_ability = ability["ability"]["name"].as_str().unwrap().to_string();
-                                }
-                            }
-                            hidden_ability
-                        }
-                        Err(why) => why.to_string()
-                    }
-                }
-                other => {
-                    format!("{}", other).to_string()
-                }
-            };
-            output.push_str(&format!("{}: {}\n", api_name, input_pokemon_ability));
-        }
-        if output.len() == 0 {
-            output.push_str(&format!("Your input \"{}\" has no valid pokemon", string));
-        }
-        output.to_string()
-    } else {
-        "How did you input a non-string?".to_string()
     }
 }
 
