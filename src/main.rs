@@ -3,53 +3,56 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{env, fs};
 
-use serenity::async_trait;
 use serenity::all::{
-    Command, Interaction, Ready,
-    CreateCommand, CreateInteractionResponse, CreateInteractionResponseMessage
+    Command, CreateInteractionResponse, CreateInteractionResponseMessage, Interaction, Ready,
 };
+use serenity::async_trait;
 use serenity::prelude::*;
 
 mod commands;
-mod loops;
 mod database;
+mod loops;
 mod services;
 
-use database::{DbPoolWrapper, establish_connection};
-
+use database::{establish_connection, BotDatabase, DbPoolWrapper};
 
 struct Handler {
     is_loop_running: AtomicBool,
     config: HashMap<String, String>,
 }
 
-
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
-        let _global_command = Command::set_global_commands(&ctx.http, vec![
-            commands::ping::register(),
-            commands::hidden_ability::register(),
-            commands::secret::register(),
-            commands::poe::register(),
-            commands::gotd::register(),
-        ])
+        let _global_command = Command::set_global_commands(
+            &ctx.http,
+            vec![
+                commands::ping::register(),
+                commands::hidden_ability::register(),
+                commands::secret::register(),
+                commands::poe::register(),
+                commands::gotd::register(),
+            ],
+        )
         .await;
 
         let loop_ctx = Arc::new(ctx);
 
         if !self.is_loop_running.load(Ordering::Relaxed) {
             let data = loop_ctx.data.read().await;
-            let pool = data.get::<DbPoolWrapper>().expect("Expected DbPool in TypeMap").clone();
-            
+            let pool = data
+                .get::<DbPoolWrapper>()
+                .expect("Expected DbPool in TypeMap")
+                .clone();
+
             loops::status::start(loop_ctx.clone());
-            loops::gotd_loop::start(loop_ctx.clone(), pool);
+            let db = BotDatabase::new((*pool).clone());
+            loops::gotd_loop::start(loop_ctx.clone(), db);
             self.is_loop_running.swap(true, Ordering::Relaxed);
         }
     }
-
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match interaction {
@@ -57,52 +60,60 @@ impl EventHandler for Handler {
                 println!("Received command interaction: {:#?}", command);
 
                 let data = ctx.data.read().await;
-                let pool = data.get::<DbPoolWrapper>().expect("Expected DbPool in TypeMap");
+                let pool = data
+                    .get::<DbPoolWrapper>()
+                    .expect("Expected DbPool in TypeMap");
 
                 let response = match command.data.name.as_str() {
                     "ping" => commands::ping::run(&command.data.options),
                     "ha" => commands::hidden_ability::run(&command.data.options).await,
                     "secret" => commands::secret::run(&command.data.options, &command.user, pool),
                     "poe" => commands::poe::run(&command.data.options, &self.config),
-                    "gotd" => commands::gotd::run(&command.data.options, &command.user, pool).await,
-                    _ => CreateInteractionResponseMessage::new().content("not implemented :(").ephemeral(true),
+                    "gotd" => {
+                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        commands::gotd::run(&command.data.options, &command.user, &db).await
+                    }
+                    _ => CreateInteractionResponseMessage::new()
+                        .content("not implemented :(")
+                        .ephemeral(true),
                 };
 
                 if let Err(why) = command
-                    .create_response(&ctx.http, 
-                        CreateInteractionResponse::Message(response)
-                    )
+                    .create_response(&ctx.http, CreateInteractionResponse::Message(response))
                     .await
                 {
                     println!("Cannot respond to slash command: {}", why);
                 }
-            },
+            }
             Interaction::Component(component) => {
                 let data = ctx.data.read().await;
-                let pool = data.get::<DbPoolWrapper>().expect("Expected DbPool in TypeMap");
+                let pool = data
+                    .get::<DbPoolWrapper>()
+                    .expect("Expected DbPool in TypeMap");
 
                 let response = match component.data.custom_id.as_str() {
                     "start_new_event" => commands::secret::start_new_event(pool).await,
                     "draw_names" => commands::secret::draw_names(&ctx, pool).await,
-                    "toggle_event_participation" => commands::secret::toggle_event_participation(&component.user, pool),
-                    _ => CreateInteractionResponseMessage::new().content("How did you even invoke this?").ephemeral(true)
+                    "toggle_event_participation" => {
+                        commands::secret::toggle_event_participation(&component.user, pool)
+                    }
+                    _ => CreateInteractionResponseMessage::new()
+                        .content("How did you even invoke this?")
+                        .ephemeral(true),
                 };
 
                 // Respond to the button press interaction
                 if let Err(why) = component
-                    .create_response(&ctx.http, 
-                        CreateInteractionResponse::Message(response)
-                    )
+                    .create_response(&ctx.http, CreateInteractionResponse::Message(response))
                     .await
                 {
                     println!("Cannot respond to secret button press: {}", why);
                 }
-            },
+            }
             _ => {}
         }
     }
 }
-
 
 #[tokio::main]
 async fn main() {
