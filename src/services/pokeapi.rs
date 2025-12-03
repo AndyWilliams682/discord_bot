@@ -1,6 +1,6 @@
+use async_trait::async_trait;
 use regex::Regex;
 use serde_json::Value;
-use async_trait::async_trait;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -59,7 +59,7 @@ impl PokeAPIService for RealPokeAPIService {
         let status = response.status();
 
         if !status.is_success() {
-            return Err(HiddenAbilityError::NonSuccessStatus(status.as_u16()))
+            return Err(HiddenAbilityError::NonSuccessStatus(status.as_u16()));
         }
         let parsed = response.json::<Value>().await?; // TODO Add this error to the internal error type
         Ok(RealPokeAPIService::extract_hidden_ability(&parsed))
