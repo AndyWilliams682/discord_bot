@@ -20,11 +20,6 @@ pub fn establish_connection(db_path: &str) -> DbPool {
     Pool::new(manager).expect("Failed to create pool.")
 }
 
-#[async_trait]
-pub trait InsertUser: Send + Sync {
-    async fn insert_user(&self, user_id: u64, username: String) -> Result<(), String>;
-}
-
 #[derive(Clone)]
 pub struct BotDatabase {
     pool: DbPool,
@@ -34,11 +29,8 @@ impl BotDatabase {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
-}
 
-#[async_trait]
-impl InsertUser for BotDatabase {
-    async fn insert_user(&self, user_id: u64, username: String) -> Result<(), String> {
+    pub fn insert_user(&self, user_id: u64, username: String) -> Result<(), String> {
         let pool_clone = self.pool.clone();
         let conn = pool_clone.get().map_err(|e| e.to_string())?;
         conn.execute(
@@ -56,7 +48,7 @@ impl InsertUser for BotDatabase {
 #[async_trait]
 impl InsertGif for BotDatabase {
     async fn insert_gif(&self, user_id: u64, username: String, url: String) -> Result<(), String> {
-        self.insert_user(user_id, username.clone()).await?;
+        self.insert_user(user_id, username.clone())?;
 
         let pool_clone = self.pool.clone();
         tokio::task::spawn_blocking(move || {
@@ -85,12 +77,12 @@ impl SelectRandomGif for BotDatabase {
             let conn = pool_clone.get().map_err(|e| e.to_string())?;
 
             let gif_stmt = "
-            SELECT submitted_by, url
-            FROM gifs
-            WHERE gifs.posts = (SELECT MIN(posts) FROM gifs)
-            ORDER BY RANDOM()
-            LIMIT 1;
-        ";
+                SELECT submitted_by, url
+                FROM gifs
+                WHERE gifs.posts = (SELECT MIN(posts) FROM gifs)
+                ORDER BY RANDOM()
+                LIMIT 1;
+            ";
 
             conn.query_row(gif_stmt, params![], |row| {
                 let gif_submitter: u64 = row.get(0)?;
