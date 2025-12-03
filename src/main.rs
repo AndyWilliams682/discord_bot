@@ -13,10 +13,9 @@ use serenity::prelude::*;
 mod commands;
 mod loops;
 mod database;
+mod services;
 
 use database::{DbPoolWrapper, establish_connection};
-
-
 
 
 struct Handler {
