@@ -5,7 +5,7 @@ WORKDIR /usr/src/app
 ENV CARGO_TARGET_DIR=/usr/src/app/target
 
 # 1. Dependency Caching: Copy manifest and setup dummy structure
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 
 # 🛑 FIX: Ensure the source directory is created BEFORE creating the dummy file
 RUN mkdir -p src/
@@ -15,7 +15,7 @@ RUN echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 
 # 2. Source Code Copy: Overwrite the dummy file with the actual source
-COPY . .
+COPY src ./src
 
 # 3. Final Build: Compile the actual binary
 # You no longer need `rm src/main.rs` because the `COPY . .` step overwrote the dummy file.
