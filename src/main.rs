@@ -97,15 +97,18 @@ impl EventHandler for Handler {
                 let response = match component.data.custom_id.as_str() {
                     "start_new_event" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::secret::start_new_event(&db).await
+                        commands::secret::start_new_event_interaction(&db).await
                     }
                     "draw_names" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::secret::draw_names(&ctx, db).await
+                        commands::secret::draw_names_interaction(&ctx, db).await
                     }
                     "toggle_event_participation" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::secret::toggle_event_participation(&component.user, &db)
+                        commands::secret::toggle_event_participation_interaction(
+                            &component.user,
+                            &db,
+                        )
                     }
                     _ => CreateInteractionResponseMessage::new()
                         .content("How did you even invoke this?")

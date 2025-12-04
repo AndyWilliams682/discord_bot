@@ -93,27 +93,32 @@ pub fn run(
         SECRET_ADMIN_ID => admin_response(),
         _ => user_response(invoker.id.get(), db),
     };
-    if let Err(why) = response_data {
-        return CreateInteractionResponseMessage::new()
-            .content(why.to_string())
-            .ephemeral(true);
-    }
-    let response_data = response_data.unwrap();
-    let mut response = CreateInteractionResponseMessage::new()
-        .content(response_data.content)
-        .ephemeral(true);
-    if !response_data.buttons.is_empty() {
-        let mut row_buttons = Vec::new();
-        for button_id in response_data.buttons {
-            row_buttons.push(
-                CreateButton::new(button_id.clone())
-                    .style(ButtonStyle::Success)
-                    .label(get_button_label(&button_id)),
-            );
+    response_from_result(response_data)
+}
+
+fn response_from_result(res: SecretResult<SecretResponse>) -> CreateInteractionResponseMessage {
+    match res {
+        Ok(data) => {
+            let mut response = CreateInteractionResponseMessage::new()
+                .content(data.content)
+                .ephemeral(true);
+            if !data.buttons.is_empty() {
+                let mut row_buttons = Vec::new();
+                for button_id in data.buttons {
+                    row_buttons.push(
+                        CreateButton::new(button_id.clone())
+                            .style(ButtonStyle::Success)
+                            .label(get_button_label(&button_id)),
+                    );
+                }
+                response = response.components(vec![CreateActionRow::Buttons(row_buttons)]);
+            }
+            response
         }
-        response = response.components(vec![CreateActionRow::Buttons(row_buttons)]);
+        Err(why) => CreateInteractionResponseMessage::new()
+            .content(why.to_string())
+            .ephemeral(true),
     }
-    response
 }
 
 fn admin_response() -> SecretResult<SecretResponse> {
@@ -179,48 +184,44 @@ pub fn current_year() -> i32 {
     chrono::Local::now().year()
 }
 
-pub async fn start_new_event(db: &impl SecretSantaTrait) -> CreateInteractionResponseMessage {
-    let res: Result<String, String> = match db.start_new_event() {
-        Ok(_) => Ok("New event has begun!".to_string()),
-        Err(why) => Err(why.to_string()),
-    };
-    match res {
-        Ok(content) => {
-            let buttons = vec!["toggle_event_participation"];
-            let mut row_buttons = Vec::new();
-            for button_id in buttons {
-                row_buttons.push(
-                    CreateButton::new(button_id)
-                        .style(ButtonStyle::Success)
-                        .label(get_button_label(button_id)),
-                );
-            }
-            CreateInteractionResponseMessage::new()
-                .content(content)
-                .components(vec![CreateActionRow::Buttons(row_buttons)])
-        }
-        Err(why) => CreateInteractionResponseMessage::new()
-            .content(why.to_string())
-            .ephemeral(true),
-    }
+pub fn start_new_event_logic(db: &impl SecretSantaTrait) -> SecretResult<SecretResponse> {
+    db.start_new_event()?;
+    Ok(SecretResponse {
+        content: "New event has begun!".to_string(),
+        buttons: vec!["toggle_event_participation".to_string()],
+    })
 }
 
-pub fn toggle_event_participation(
+pub async fn start_new_event_interaction(
+    db: &impl SecretSantaTrait,
+) -> CreateInteractionResponseMessage {
+    response_from_result(start_new_event_logic(db))
+}
+
+pub fn toggle_event_participation_logic(
+    user_id: u64,
+    username: String,
+    db: &impl SecretSantaTrait,
+) -> SecretResult<SecretResponse> {
+    let toggled_participation = db.toggle_event_participation(user_id, username)?;
+    Ok(SecretResponse {
+        content: toggled_participation.to_string(),
+        buttons: vec![],
+    })
+}
+
+pub fn toggle_event_participation_interaction(
     invoker: &User,
     db: &impl SecretSantaTrait,
 ) -> CreateInteractionResponseMessage {
-    let res = db.toggle_event_participation(invoker.id.get(), invoker.name.clone());
-    match res {
-        Ok(toggled_participation) => CreateInteractionResponseMessage::new()
-            .content(toggled_participation.to_string())
-            .ephemeral(false),
-        Err(why) => CreateInteractionResponseMessage::new()
-            .content(why.to_string())
-            .ephemeral(true),
-    }
+    response_from_result(toggle_event_participation_logic(
+        invoker.id.get(),
+        invoker.name.clone(),
+        db,
+    ))
 }
 
-pub async fn draw_names(
+pub async fn draw_names_interaction(
     ctx: &Context,
     db: impl SecretSantaTrait + Clone + 'static,
 ) -> CreateInteractionResponseMessage {
@@ -230,33 +231,37 @@ pub async fn draw_names(
 
     match assignments_res {
         Ok(assignments) => {
-            for &(participant_id, giftee_id) in assignments.iter() {
-                if let Ok(participant_user) = UserId::new(participant_id).to_user(&ctx.http).await {
-                    let giftee_mention = UserId::new(giftee_id).mention().to_string();
-                    let dm_message = format!(
-                        "🎉 Your Secret Santa assignment for the {} event is {}! 🎉",
-                        current_year(),
-                        giftee_mention
-                    );
-                    if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
-                        if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {
-                            println!(
-                                "Could not fetch Discord user object for ID {}: {}",
-                                participant_id, why
-                            );
-                        }
-                    }
-                } else {
-                    println!(
-                        "Could not fetch Discord user object for ID {}",
-                        participant_id
-                    );
-                }
-            }
+            notify_participants(ctx, &assignments).await;
             CreateInteractionResponseMessage::new().content("Names have been drawn! Check your DMs")
         }
         Err(why) => CreateInteractionResponseMessage::new()
             .content(format!("{}", why))
             .ephemeral(true),
+    }
+}
+
+async fn notify_participants(ctx: &Context, assignments: &Assignments) {
+    for &(participant_id, giftee_id) in assignments.iter() {
+        if let Ok(participant_user) = UserId::new(participant_id).to_user(&ctx.http).await {
+            let giftee_mention = UserId::new(giftee_id).mention().to_string();
+            let dm_message = format!(
+                "🎉 Your Secret Santa assignment for the {} event is {}! 🎉",
+                current_year(),
+                giftee_mention
+            );
+            if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
+                if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {
+                    println!(
+                        "Could not fetch Discord user object for ID {}: {}",
+                        participant_id, why
+                    );
+                }
+            }
+        } else {
+            println!(
+                "Could not fetch Discord user object for ID {}",
+                participant_id
+            );
+        }
     }
 }
