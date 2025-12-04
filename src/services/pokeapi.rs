@@ -3,33 +3,33 @@ use regex::Regex;
 use serde_json::Value;
 use thiserror::Error;
 
+const MIN_CHARS: usize = 3; // Shortest name is "Mew"
+const MAX_CHARS: usize = 25; // arbitrary maximum
+pub const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
+
 #[derive(Debug, Error, PartialEq)]
-pub enum HiddenAbilityError {
+pub enum PokeAPIError {
     #[error("The network request returned a non-success status code: {0}")]
     NonSuccessStatus(u16),
 
     #[error("Pokemon not found: {0}")]
     InvalidContentType(String),
 
-    #[error("Pokemon name is not valid for PokeAPI: {0}")]
+    #[error("Name is not valid for PokeAPI: {0}")]
     InvalidPokeAPIName(String),
 }
 
-impl From<reqwest::Error> for HiddenAbilityError {
+impl From<reqwest::Error> for PokeAPIError {
     fn from(e: reqwest::Error) -> Self {
-        HiddenAbilityError::InvalidContentType(e.to_string())
+        PokeAPIError::InvalidContentType(e.to_string())
     }
 }
 
-pub type HiddenAbilityResult = Result<String, HiddenAbilityError>;
-
-const MIN_CHARS: usize = 3; // Shortest name is "Mew"
-const MAX_CHARS: usize = 25; // arbitrary maximum
-const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
+pub type PokeAPIResult = Result<String, PokeAPIError>;
 
 #[async_trait]
 pub trait PokeAPIService {
-    async fn get_hidden_ability(&self, api_name: &str) -> HiddenAbilityResult;
+    async fn get_hidden_ability(&self, api_name: &str) -> PokeAPIResult;
 }
 
 pub struct RealPokeAPIService;
@@ -53,20 +53,20 @@ impl RealPokeAPIService {
 
 #[async_trait]
 impl PokeAPIService for RealPokeAPIService {
-    async fn get_hidden_ability(&self, api_name: &str) -> HiddenAbilityResult {
+    async fn get_hidden_ability(&self, api_name: &str) -> PokeAPIResult {
         let url = format!("https://pokeapi.co/api/v2/pokemon/{}", api_name);
         let response = reqwest::get(&url).await?;
         let status = response.status();
 
         if !status.is_success() {
-            return Err(HiddenAbilityError::NonSuccessStatus(status.as_u16()));
+            return Err(PokeAPIError::NonSuccessStatus(status.as_u16()));
         }
-        let parsed = response.json::<Value>().await?; // TODO Add this error to the internal error type
+        let parsed = response.json::<Value>().await?;
         Ok(RealPokeAPIService::extract_hidden_ability(&parsed))
     }
 }
 
-pub fn convert_to_pokeapi_name(s: String) -> HiddenAbilityResult {
+pub fn convert_to_pokeapi_name(s: String) -> PokeAPIResult {
     let chars_to_null = Regex::new(r"[':.]").unwrap();
     let forbidden_chars = Regex::new(r"[^a-z2-]").unwrap();
 
@@ -83,7 +83,7 @@ pub fn convert_to_pokeapi_name(s: String) -> HiddenAbilityResult {
     let contains_forbidden_chars = forbidden_chars.is_match(&no_punctuation_s);
 
     if is_empty_or_whitespace || is_too_short || is_too_long || contains_forbidden_chars {
-        Err(HiddenAbilityError::InvalidPokeAPIName(s))
+        Err(PokeAPIError::InvalidPokeAPIName(s))
     } else {
         Ok(s)
     }
