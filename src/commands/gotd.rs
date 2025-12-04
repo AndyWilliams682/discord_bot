@@ -10,11 +10,10 @@ use serenity::all::{
 use thiserror::Error;
 use url::ParseError;
 
+use crate::database::{DatabaseError, DatabaseResult};
+
 #[derive(Debug, Error, PartialEq)]
 pub enum UrlValidationError {
-    #[error("The URL format is invalid.")]
-    InvalidFormat,
-
     #[error("The URL must use the HTTP or HTTPS scheme")]
     InvalidScheme,
 
@@ -42,7 +41,50 @@ impl From<ToStrError> for UrlValidationError {
     }
 }
 
-async fn is_valid_url(s: &str) -> Result<(), UrlValidationError> {
+#[derive(Debug, Error, PartialEq)]
+pub enum GotdError {
+    #[error("The url provided is not valid: {0}")]
+    Validation(#[from] UrlValidationError),
+
+    #[error("The database encountered an error: {0}")]
+    Database(#[from] DatabaseError),
+}
+
+#[async_trait]
+pub trait GotdTrait: Send + Sync {
+    async fn insert_gif(&self, user_id: u64, username: String, url: String) -> DatabaseResult<()>;
+    async fn select_random_gif(&self) -> DatabaseResult<(u64, String)>;
+}
+
+pub async fn run(
+    options: &[CommandDataOption],
+    invoker: &User,
+    repo: &impl GotdTrait,
+) -> CreateInteractionResponseMessage {
+    let url_option = &options.get(0).expect("Expected string option").value;
+    let content = if let CommandDataOptionValue::String(url) = url_option {
+        match submit_gif_logic(url.clone(), invoker.id.get(), invoker.name.clone(), repo).await {
+            Ok(()) => "Gif submitted, thank you!".to_string(),
+            Err(why) => why.to_string(),
+        }
+    } else {
+        "How did you input a non-string?".to_string()
+    };
+    CreateInteractionResponseMessage::new()
+        .content(content)
+        .ephemeral(true)
+}
+
+pub fn register() -> CreateCommand {
+    CreateCommand::new("gotd")
+        .description("Submit a url for for gif of the day")
+        .add_option(
+            CreateCommandOption::new(CommandOptionType::String, "url", "The url of your gif")
+                .required(true),
+        )
+}
+
+async fn is_valid_gif_url(s: &str) -> Result<(), UrlValidationError> {
     let url = Url::parse(s)?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(UrlValidationError::InvalidScheme);
@@ -71,63 +113,12 @@ async fn is_valid_url(s: &str) -> Result<(), UrlValidationError> {
     ))
 }
 
-#[derive(Debug, PartialEq)]
-pub enum GotdError {
-    Validation(UrlValidationError),
-    Database(String),
-    Internal(String),
-}
-
-#[async_trait]
-pub trait InsertGif: Send + Sync {
-    async fn insert_gif(&self, user_id: u64, username: String, url: String) -> Result<(), String>;
-}
-
-#[async_trait] // Might want to combine with InsertGif
-pub trait SelectRandomGif: Send + Sync {
-    async fn select_random_gif(&self) -> Result<(u64, String), String>;
-}
-
 pub async fn submit_gif_logic(
     url: String,
     invoker_id: u64,
     invoker_name: String,
-    repo: &impl InsertGif,
-) -> String {
-    if is_valid_url(&url).await.is_err() {
-        return "Invalid URL".to_string();
-    }
-
-    match repo.insert_gif(invoker_id, invoker_name, url).await {
-        Ok(_) => "Gif added, thank you!".to_string(),
-        Err(e) => {
-            println!("Database error during gif submission: {}", e);
-            "Database operation failed.".to_string()
-        }
-    }
-}
-
-pub fn register() -> CreateCommand {
-    CreateCommand::new("gotd")
-        .description("Submit a url for for gif of the day")
-        .add_option(
-            CreateCommandOption::new(CommandOptionType::String, "url", "The url of your gif")
-                .required(true),
-        )
-}
-
-pub async fn run(
-    options: &[CommandDataOption],
-    invoker: &User,
-    repo: &impl InsertGif,
-) -> CreateInteractionResponseMessage {
-    let url_option = &options.get(0).expect("Expected string option").value;
-    let content = if let CommandDataOptionValue::String(url) = url_option {
-        submit_gif_logic(url.clone(), invoker.id.get(), invoker.name.clone(), repo).await
-    } else {
-        "How did you input a non-string?".to_string()
-    };
-    CreateInteractionResponseMessage::new()
-        .content(content)
-        .ephemeral(true)
+    repo: &impl GotdTrait,
+) -> Result<(), GotdError> {
+    is_valid_gif_url(&url).await?;
+    Ok(repo.insert_gif(invoker_id, invoker_name, url).await?)
 }

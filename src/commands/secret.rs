@@ -10,14 +10,40 @@ use serenity::all::{
 use serenity::prelude::*;
 use tokio::task;
 
-use crate::database::DbPool;
+use crate::database::{DatabaseResult, DbPool};
+
+pub type Assignee = Option<u64>;
+pub type Assignments = Vec<(u64, u64)>;
+
+pub struct ParticipantUpdate {
+    total_participants: u64,
+    latest_change: ToggledParticipation,
+}
+
+impl ParticipantUpdate {
+    pub fn new(total_participants: u64, latest_change: ToggledParticipation) -> Self {
+        Self {
+            total_participants,
+            latest_change,
+        }
+    }
+}
+
+pub enum ToggledParticipation {
+    UserJoined(u64),
+    UserLeft(u64),
+}
 
 #[async_trait]
 pub trait SecretSantaTrait: Send + Sync {
-    fn get_latest_giftee(&self, user_id: u64) -> Result<String>;
-    fn is_event_open(&self) -> Result<bool>;
-    fn toggle_event_participation(&self, user_id: u64, username: String) -> Result<String>;
-    fn get_drawn_names(&self) -> Result<Vec<(u64, u64)>>;
+    fn get_latest_giftee(&self, user_id: u64) -> DatabaseResult<Assignee>;
+    fn is_event_open(&self) -> DatabaseResult<bool>;
+    fn toggle_event_participation(
+        &self,
+        user_id: u64,
+        username: String,
+    ) -> DatabaseResult<ParticipantUpdate>;
+    fn get_drawn_names(&self) -> DatabaseResult<Assignments>;
 }
 
 fn get_button_label(button_id: &str) -> &str {
@@ -86,7 +112,7 @@ fn get_latest_giftee(user_id: UserId, conn: &Connection) -> Result<String> {
         Err(rusqlite::Error::QueryReturnedNoRows) => {
             Ok("No giftee found - are you sure you're a participant for this event?".to_string())
         }
-        Err(e) => Err(e),
+        Err(why) => Err(why),
     }
 }
 
@@ -131,8 +157,8 @@ pub fn run(
             }
             response
         }
-        Err(e) => CreateInteractionResponseMessage::new()
-            .content(format!("{}", e))
+        Err(why) => CreateInteractionResponseMessage::new()
+            .content(format!("{}", why))
             .ephemeral(true),
     }
 }
@@ -149,21 +175,21 @@ pub async fn start_new_event(pool: &DbPool) -> CreateInteractionResponseMessage 
     let res: Result<String, String> = match pool.get() {
         Ok(conn) => {
             let current_year = chrono::Local::now().year();
-            if let Err(e) = conn.execute(
+            if let Err(why) = conn.execute(
                 "INSERT INTO events (event_id) VALUES (?1)",
                 params![current_year],
             ) {
-                Err(e.to_string())
-            } else if let Err(e) = conn.execute(
+                Err(why.to_string())
+            } else if let Err(why) = conn.execute(
                 "INSERT INTO participation (event, user) VALUES (?1, ?2);",
                 params![current_year, ADMIN_ID],
             ) {
-                Err(e.to_string())
+                Err(why.to_string())
             } else {
                 Ok("New event has begun!".to_string())
             }
         }
-        Err(e) => Err(e.to_string()),
+        Err(why) => Err(why.to_string()),
     };
 
     match res {
@@ -181,8 +207,8 @@ pub async fn start_new_event(pool: &DbPool) -> CreateInteractionResponseMessage 
                 .content(content)
                 .components(vec![CreateActionRow::Buttons(row_buttons)])
         }
-        Err(e) => CreateInteractionResponseMessage::new()
-            .content(format!("{}", e))
+        Err(why) => CreateInteractionResponseMessage::new()
+            .content(format!("{}", why))
             .ephemeral(true),
     }
 }
@@ -277,8 +303,8 @@ pub fn toggle_event_participation(
 
     match res {
         Ok(content) => CreateInteractionResponseMessage::new().content(content),
-        Err(e) => CreateInteractionResponseMessage::new()
-            .content(format!("{}", e))
+        Err(why) => CreateInteractionResponseMessage::new()
+            .content(format!("{}", why))
             .ephemeral(true),
     }
 }
@@ -417,8 +443,8 @@ pub async fn draw_names(ctx: &Context, pool: &DbPool) -> CreateInteractionRespon
             }
             CreateInteractionResponseMessage::new().content("Names have been drawn! Check your DMs")
         }
-        Err(e) => CreateInteractionResponseMessage::new()
-            .content(format!("{}", e))
+        Err(why) => CreateInteractionResponseMessage::new()
+            .content(format!("{}", why))
             .ephemeral(true),
     }
 }
