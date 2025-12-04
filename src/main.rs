@@ -67,7 +67,10 @@ impl EventHandler for Handler {
                 let response = match command.data.name.as_str() {
                     "ping" => commands::ping::run(&command.data.options),
                     "ha" => commands::hidden_ability::run(&command.data.options).await,
-                    "secret" => commands::secret::run(&command.data.options, &command.user, pool),
+                    "secret" => {
+                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        commands::secret::run(&command.data.options, &command.user, &db)
+                    }
                     "poe" => commands::poe::run(&command.data.options, &self.config),
                     "gotd" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
@@ -92,10 +95,17 @@ impl EventHandler for Handler {
                     .expect("Expected DbPool in TypeMap");
 
                 let response = match component.data.custom_id.as_str() {
-                    "start_new_event" => commands::secret::start_new_event(pool).await,
-                    "draw_names" => commands::secret::draw_names(&ctx, pool).await,
+                    "start_new_event" => {
+                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        commands::secret::start_new_event(&db).await
+                    }
+                    "draw_names" => {
+                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        commands::secret::draw_names(&ctx, db).await
+                    }
                     "toggle_event_participation" => {
-                        commands::secret::toggle_event_participation(&component.user, pool)
+                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        commands::secret::toggle_event_participation(&component.user, &db)
                     }
                     _ => CreateInteractionResponseMessage::new()
                         .content("How did you even invoke this?")

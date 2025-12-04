@@ -14,6 +14,7 @@ use crate::commands::gotd::GotdTrait;
 use crate::commands::secret::{
     check_assignment_validation, current_year, Assignee, Assignments, GifteeHistory,
     ParticipantUpdate, SecretSantaTrait, ToggledParticipation, PREV_RELEVANT_EVENTS,
+    SECRET_ADMIN_ID,
 };
 
 pub type DbPool = Pool<SqliteConnectionManager>;
@@ -160,6 +161,22 @@ impl SecretSantaTrait for BotDatabase {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(why) => Err(why.into()),
         }
+    }
+
+    fn start_new_event(&self) -> DatabaseResult<()> {
+        let pool_clone = self.pool.clone();
+        let conn = pool_clone.get()?;
+        conn.execute(
+            // New event in the database
+            "INSERT INTO events (event_id) VALUES (?1)",
+            params![current_year()],
+        )?;
+        conn.execute(
+            // Adding admin to the event
+            "INSERT INTO participation (event, user) VALUES (?1, ?2);",
+            params![current_year(), SECRET_ADMIN_ID],
+        )?;
+        Ok(())
     }
 
     fn is_event_open(&self) -> DatabaseResult<bool> {

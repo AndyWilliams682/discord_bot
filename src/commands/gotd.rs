@@ -59,11 +59,11 @@ pub trait GotdTrait: Send + Sync {
 pub async fn run(
     options: &[CommandDataOption],
     invoker: &User,
-    repo: &impl GotdTrait,
+    db: &impl GotdTrait,
 ) -> CreateInteractionResponseMessage {
     let url_option = &options.get(0).expect("Expected string option").value;
     let content = if let CommandDataOptionValue::String(url) = url_option {
-        match submit_gif_logic(url.clone(), invoker.id.get(), invoker.name.clone(), repo).await {
+        match submit_gif_logic(url.clone(), invoker.id.get(), invoker.name.clone(), db).await {
             Ok(()) => "Gif submitted, thank you!".to_string(),
             Err(why) => why.to_string(),
         }
@@ -117,8 +117,8 @@ pub async fn submit_gif_logic(
     url: String,
     invoker_id: u64,
     invoker_name: String,
-    repo: &impl GotdTrait,
+    db: &impl GotdTrait,
 ) -> Result<(), GotdError> {
     is_valid_gif_url(&url).await?;
-    Ok(repo.insert_gif(invoker_id, invoker_name, url).await?)
+    Ok(db.insert_gif(invoker_id, invoker_name, url).await?)
 }
