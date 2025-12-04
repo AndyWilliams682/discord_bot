@@ -4,19 +4,6 @@ use serenity::all::{
     CreateCommandOption, CreateInteractionResponseMessage,
 };
 
-pub fn register() -> CreateCommand {
-    CreateCommand::new("ha")
-        .description("Outputs the hidden abilities of all pokemon provided")
-        .add_option(
-            CreateCommandOption::new(
-                CommandOptionType::String,
-                "pokemon_list",
-                "List of Pokemon (eg: unown, vulpix-alola, nidoran-f, falinks)",
-            )
-            .required(true),
-        )
-}
-
 pub async fn run(options: &[CommandDataOption]) -> CreateInteractionResponseMessage {
     if let CommandDataOptionValue::String(raw_input) =
         &options.get(0).expect("Expected string option").value
@@ -33,15 +20,28 @@ pub async fn run(options: &[CommandDataOption]) -> CreateInteractionResponseMess
     }
 }
 
-async fn format_ability_output(input_name: &str, api_service: &impl PokeAPIService) -> String {
+pub fn register() -> CreateCommand {
+    CreateCommand::new("ha")
+        .description("Outputs the hidden abilities of all pokemon provided")
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::String,
+                "pokemon_list",
+                "List of Pokemon (eg: unown, vulpix-alola, nidoran-f, falinks)",
+            )
+            .required(true),
+        )
+}
+
+async fn format_hidden_ability(input_name: &str, api_service: &impl PokeAPIService) -> String {
     let api_name = match convert_to_pokeapi_name(input_name.to_string()) {
         Ok(name) => name,
-        Err(why) => return format!("{}: {:?}\n", input_name, why),
+        Err(why) => return why.to_string(),
     };
 
     match api_service.get_hidden_ability(&api_name).await {
         Ok(api_output) => format!("{}: {}\n", api_name, api_output),
-        Err(err) => format!("{}: {:?}\n", api_name, err),
+        Err(why) => why.to_string(),
     }
 }
 
@@ -51,7 +51,7 @@ async fn get_hidden_abilities(
 ) -> String {
     let mut output: String = "".to_string();
     for input_name in pokemon_list {
-        output.push_str(&format_ability_output(input_name, api_service).await);
+        output.push_str(&format_hidden_ability(input_name, api_service).await);
     }
     output.to_string()
 }
@@ -59,8 +59,7 @@ async fn get_hidden_abilities(
 #[cfg(test)]
 mod tests {
     use crate::commands::hidden_ability;
-    use crate::services::pokeapi::{self, NO_HIDDEN_ABILITY};
-    use serenity::model::application::interaction::application_command::CommandDataOptionValue;
+    use crate::services::pokeapi::NO_HIDDEN_ABILITY;
 
     // Integration tests that actually hit the API (or mock it if we had mocks, but here we use the real one as per original code style for now, or maybe I should check if I can mock it easily. The original tests seemed to be integration tests mostly?
     // Wait, the original tests were calling `get_pokemon_ha_from_api` which doesn't exist anymore.
@@ -88,16 +87,16 @@ mod tests {
     // I will rewrite the tests to test `get_hidden_abilities` using `RealPokeAPIService` for now, as I don't have a mock yet (and the original code used `RealPokeAPIService` directly in `run`).
     // Actually, `get_hidden_abilities` takes `impl PokeAPIService`. I could define a Mock service in the test.
 
-    use crate::services::pokeapi::{HiddenAbilityError, HiddenAbilityResult, PokeAPIService};
+    use crate::services::pokeapi::{PokeAPIError, PokeAPIResult, PokeAPIService};
     use async_trait::async_trait;
 
     struct MockPokeAPIService {
-        response: HiddenAbilityResult,
+        response: PokeAPIResult,
     }
 
     #[async_trait]
     impl PokeAPIService for MockPokeAPIService {
-        async fn get_hidden_ability(&self, _api_name: &str) -> HiddenAbilityResult {
+        async fn get_hidden_ability(&self, _api_name: &str) -> PokeAPIResult {
             // For simplicity in this refactor, I'll just return what's configured.
             // But real tests want specific responses for specific pokemon.
             // Let's make it a bit smarter or just use RealPokeAPIService for integration tests if that's what they were.
@@ -119,7 +118,7 @@ mod tests {
                 "porygon" | "porygon2" | "porygon-z" => Ok("analytic".to_string()),
                 "rotom" => Ok(NO_HIDDEN_ABILITY.to_string()),
                 "golem-alola" => Ok("galvanize".to_string()),
-                "missingno" => Err(HiddenAbilityError::NonSuccessStatus(404)), // api_name is lowercased
+                "missingno" => Err(PokeAPIError::NonSuccessStatus(404)), // api_name is lowercased
                 _ => Ok("unknown".to_string()),
             }
         }
