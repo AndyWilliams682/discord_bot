@@ -76,8 +76,15 @@ impl EventHandler for Handler {
                         let db = BotDatabase::new((*pool).as_ref().clone());
                         commands::gotd::run(&command.data.options, &command.user, &db).await
                     }
-                    _ => CreateInteractionResponseMessage::new()
+                    _ => Ok(CreateInteractionResponseMessage::new()
                         .content("not implemented :(")
+                        .ephemeral(true)),
+                };
+
+                let response = match response {
+                    Ok(data) => data,
+                    Err(why) => CreateInteractionResponseMessage::new()
+                        .content(why.to_string())
                         .ephemeral(true),
                 };
 
@@ -110,8 +117,15 @@ impl EventHandler for Handler {
                             &db,
                         )
                     }
-                    _ => CreateInteractionResponseMessage::new()
+                    _ => Ok(CreateInteractionResponseMessage::new()
                         .content("How did you even invoke this?")
+                        .ephemeral(true)),
+                };
+
+                let response = match response {
+                    Ok(data) => data,
+                    Err(why) => CreateInteractionResponseMessage::new()
+                        .content(why.to_string())
                         .ephemeral(true),
                 };
 

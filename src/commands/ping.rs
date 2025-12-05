@@ -1,7 +1,10 @@
+use crate::commands::error::CommandError;
 use serenity::all::{CommandDataOption, CreateCommand, CreateInteractionResponseMessage};
 
-pub fn run(_options: &[CommandDataOption]) -> CreateInteractionResponseMessage {
-    CreateInteractionResponseMessage::new().content(get_response_content())
+pub fn run(
+    _options: &[CommandDataOption],
+) -> Result<CreateInteractionResponseMessage, CommandError> {
+    Ok(CreateInteractionResponseMessage::new().content(get_response_content()))
 }
 
 pub fn register() -> CreateCommand {

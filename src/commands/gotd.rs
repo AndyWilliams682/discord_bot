@@ -10,6 +10,7 @@ use serenity::all::{
 use thiserror::Error;
 use url::ParseError;
 
+use crate::commands::error::CommandError;
 use crate::database::{DatabaseError, DatabaseResult};
 
 #[derive(Debug, Error, PartialEq)]
@@ -39,15 +40,6 @@ impl From<ToStrError> for UrlValidationError {
             "The header could not be interpreted as string".to_string(),
         )
     }
-}
-
-#[derive(Debug, Error, PartialEq)]
-pub enum GotdError {
-    #[error("{0}")]
-    Validation(#[from] UrlValidationError),
-
-    #[error("{0}")]
-    Database(#[from] DatabaseError),
 }
 
 #[async_trait]
@@ -99,7 +91,7 @@ pub async fn run(
     options: &[CommandDataOption],
     invoker: &User,
     db: &impl GotdTrait,
-) -> CreateInteractionResponseMessage {
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     let url_option = &options.get(0).expect("Expected string option").value;
     let content = if let CommandDataOptionValue::String(url) = url_option {
         let validator = RealGifValidator;
@@ -113,14 +105,16 @@ pub async fn run(
         .await
         {
             Ok(()) => "Gif submitted, thank you!".to_string(),
-            Err(why) => why.to_string(),
+            Err(why) => return Err(why),
         }
     } else {
-        "How did you input a non-string?".to_string()
+        return Err(CommandError::InvalidOption(
+            "How did you input a non-string?".to_string(),
+        ));
     };
-    CreateInteractionResponseMessage::new()
+    Ok(CreateInteractionResponseMessage::new()
         .content(content)
-        .ephemeral(true)
+        .ephemeral(true))
 }
 
 pub fn register() -> CreateCommand {
@@ -138,7 +132,7 @@ pub async fn submit_gif_logic(
     invoker_name: String,
     db: &impl GotdTrait,
     validator: &impl GifValidator,
-) -> Result<(), GotdError> {
+) -> Result<(), CommandError> {
     validator.validate(&url).await?;
     Ok(db.insert_gif(invoker_id, invoker_name, url).await?)
 }

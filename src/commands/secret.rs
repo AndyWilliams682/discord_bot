@@ -15,7 +15,9 @@ pub const SECRET_ADMIN_ID: u64 = 248966803139723264; // Grif's ID
 const WEIGHTS: [f32; 3] = [0.0, 0.0, 0.5];
 pub const PREV_RELEVANT_EVENTS: usize = WEIGHTS.len();
 
-pub type SecretResult<T> = Result<T, DatabaseError>;
+use crate::commands::error::CommandError;
+
+pub type SecretResult<T> = Result<T, CommandError>;
 
 #[derive(Debug)]
 pub struct SecretResponse {
@@ -88,7 +90,7 @@ pub fn run(
     _options: &[CommandDataOption],
     invoker: &User,
     db: &impl SecretSantaTrait,
-) -> CreateInteractionResponseMessage {
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     let response_data = match invoker.id.get() {
         SECRET_ADMIN_ID => admin_response(),
         _ => user_response(invoker.id.get(), db),
@@ -96,7 +98,9 @@ pub fn run(
     response_from_result(response_data)
 }
 
-fn response_from_result(res: SecretResult<SecretResponse>) -> CreateInteractionResponseMessage {
+fn response_from_result(
+    res: SecretResult<SecretResponse>,
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     match res {
         Ok(data) => {
             let mut response = CreateInteractionResponseMessage::new()
@@ -113,11 +117,9 @@ fn response_from_result(res: SecretResult<SecretResponse>) -> CreateInteractionR
                 }
                 response = response.components(vec![CreateActionRow::Buttons(row_buttons)]);
             }
-            response
+            Ok(response)
         }
-        Err(why) => CreateInteractionResponseMessage::new()
-            .content(why.to_string())
-            .ephemeral(true),
+        Err(why) => Err(why),
     }
 }
 
@@ -194,7 +196,7 @@ pub fn start_new_event_logic(db: &impl SecretSantaTrait) -> SecretResult<SecretR
 
 pub async fn start_new_event_interaction(
     db: &impl SecretSantaTrait,
-) -> CreateInteractionResponseMessage {
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     response_from_result(start_new_event_logic(db))
 }
 
@@ -213,7 +215,7 @@ pub fn toggle_event_participation_logic(
 pub fn toggle_event_participation_interaction(
     invoker: &User,
     db: &impl SecretSantaTrait,
-) -> CreateInteractionResponseMessage {
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     response_from_result(toggle_event_participation_logic(
         invoker.id.get(),
         invoker.name.clone(),
@@ -224,7 +226,7 @@ pub fn toggle_event_participation_interaction(
 pub async fn draw_names_interaction(
     ctx: &Context,
     db: impl SecretSantaTrait + Clone + 'static,
-) -> CreateInteractionResponseMessage {
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     let assignments_res = task::spawn_blocking(move || db.get_drawn_names())
         .await
         .expect("Failed to run database tasks");
@@ -232,11 +234,10 @@ pub async fn draw_names_interaction(
     match assignments_res {
         Ok(assignments) => {
             notify_participants(ctx, &assignments).await;
-            CreateInteractionResponseMessage::new().content("Names have been drawn! Check your DMs")
+            Ok(CreateInteractionResponseMessage::new()
+                .content("Names have been drawn! Check your DMs"))
         }
-        Err(why) => CreateInteractionResponseMessage::new()
-            .content(format!("{}", why))
-            .ephemeral(true),
+        Err(why) => Err(why.into()),
     }
 }
 

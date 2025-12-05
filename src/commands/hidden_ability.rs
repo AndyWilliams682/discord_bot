@@ -1,10 +1,13 @@
+use crate::commands::error::CommandError;
 use crate::services::pokeapi::{convert_to_pokeapi_name, PokeAPIService, RealPokeAPIService};
 use serenity::all::{
     CommandDataOption, CommandDataOptionValue, CommandOptionType, CreateCommand,
     CreateCommandOption, CreateInteractionResponseMessage,
 };
 
-pub async fn run(options: &[CommandDataOption]) -> CreateInteractionResponseMessage {
+pub async fn run(
+    options: &[CommandDataOption],
+) -> Result<CreateInteractionResponseMessage, CommandError> {
     if let CommandDataOptionValue::String(raw_input) =
         &options.get(0).expect("Expected string option").value
     {
@@ -14,9 +17,11 @@ pub async fn run(options: &[CommandDataOption]) -> CreateInteractionResponseMess
         if content.len() == 0 {
             content = format!("Your input \"{}\" has no valid pokemon", raw_input)
         }
-        CreateInteractionResponseMessage::new().content(content)
+        Ok(CreateInteractionResponseMessage::new().content(content))
     } else {
-        CreateInteractionResponseMessage::new().content("How did you input a non-string?")
+        Err(CommandError::InvalidOption(
+            "How did you input a non-string?".to_string(),
+        ))
     }
 }
 
