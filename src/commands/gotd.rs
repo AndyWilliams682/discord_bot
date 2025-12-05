@@ -17,10 +17,10 @@ pub enum UrlValidationError {
     #[error("The URL must use the HTTP or HTTPS scheme")]
     InvalidScheme,
 
-    #[error("The network request returned a non-success status code: {0}")]
+    #[error("{0}")]
     NonSuccessStatus(u16),
 
-    #[error("The content type is invalid or missing: {0}")]
+    #[error("{0}")]
     InvalidContentType(String),
 
     #[error("Could not parse url")]
@@ -43,10 +43,10 @@ impl From<ToStrError> for UrlValidationError {
 
 #[derive(Debug, Error, PartialEq)]
 pub enum GotdError {
-    #[error("The url provided is not valid: {0}")]
+    #[error("{0}")]
     Validation(#[from] UrlValidationError),
 
-    #[error("The database encountered an error: {0}")]
+    #[error("{0}")]
     Database(#[from] DatabaseError),
 }
 
