@@ -56,6 +56,45 @@ pub trait GotdTrait: Send + Sync {
     async fn select_random_gif(&self) -> DatabaseResult<(u64, String)>;
 }
 
+#[async_trait]
+pub trait GifValidator: Send + Sync {
+    async fn validate(&self, url: &str) -> Result<(), UrlValidationError>;
+}
+
+pub struct RealGifValidator;
+
+#[async_trait]
+impl GifValidator for RealGifValidator {
+    async fn validate(&self, s: &str) -> Result<(), UrlValidationError> {
+        let url = Url::parse(s)?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(UrlValidationError::InvalidScheme);
+        }
+
+        let client = Client::new();
+
+        let response = client.head(url).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(UrlValidationError::NonSuccessStatus(status.as_u16()));
+        }
+        if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
+            let content_type_str = content_type.to_str()?.to_lowercase();
+            if content_type_str.starts_with("image/gif")
+                || content_type_str.starts_with("video/webm")
+                || content_type_str.starts_with("video/mp4")
+            {
+                return Ok(());
+            } else {
+                return Err(UrlValidationError::InvalidContentType(content_type_str));
+            }
+        }
+        Err(UrlValidationError::InvalidContentType(
+            "Header Missing".to_string(),
+        ))
+    }
+}
+
 pub async fn run(
     options: &[CommandDataOption],
     invoker: &User,
@@ -63,7 +102,16 @@ pub async fn run(
 ) -> CreateInteractionResponseMessage {
     let url_option = &options.get(0).expect("Expected string option").value;
     let content = if let CommandDataOptionValue::String(url) = url_option {
-        match submit_gif_logic(url.clone(), invoker.id.get(), invoker.name.clone(), db).await {
+        let validator = RealGifValidator;
+        match submit_gif_logic(
+            url.clone(),
+            invoker.id.get(),
+            invoker.name.clone(),
+            db,
+            &validator,
+        )
+        .await
+        {
             Ok(()) => "Gif submitted, thank you!".to_string(),
             Err(why) => why.to_string(),
         }
@@ -84,41 +132,13 @@ pub fn register() -> CreateCommand {
         )
 }
 
-async fn is_valid_gif_url(s: &str) -> Result<(), UrlValidationError> {
-    let url = Url::parse(s)?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(UrlValidationError::InvalidScheme);
-    }
-
-    let client = Client::new();
-
-    let response = client.head(url).send().await?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(UrlValidationError::NonSuccessStatus(status.as_u16()));
-    }
-    if let Some(content_type) = response.headers().get(CONTENT_TYPE) {
-        let content_type_str = content_type.to_str()?.to_lowercase();
-        if content_type_str.starts_with("image/gif")
-            || content_type_str.starts_with("video/webm")
-            || content_type_str.starts_with("video/mp4")
-        {
-            return Ok(());
-        } else {
-            return Err(UrlValidationError::InvalidContentType(content_type_str));
-        }
-    }
-    Err(UrlValidationError::InvalidContentType(
-        "Header Missing".to_string(),
-    ))
-}
-
 pub async fn submit_gif_logic(
     url: String,
     invoker_id: u64,
     invoker_name: String,
     db: &impl GotdTrait,
+    validator: &impl GifValidator,
 ) -> Result<(), GotdError> {
-    is_valid_gif_url(&url).await?;
+    validator.validate(&url).await?;
     Ok(db.insert_gif(invoker_id, invoker_name, url).await?)
 }
