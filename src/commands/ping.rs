@@ -14,3 +14,13 @@ pub fn register() -> CreateCommand {
 fn get_response_content() -> String {
     "Hey, I'm alive!".to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_response_content() {
+        assert_eq!(get_response_content(), "Hey, I'm alive!");
+    }
+}
