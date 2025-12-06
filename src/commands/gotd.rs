@@ -136,3 +136,94 @@ pub async fn submit_gif_logic(
     validator.validate(&url).await?;
     Ok(db.insert_gif(invoker_id, invoker_name, url).await?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::DatabaseError;
+
+    struct MockGotdDB {
+        should_fail: bool,
+    }
+
+    #[async_trait]
+    impl GotdTrait for MockGotdDB {
+        async fn insert_gif(
+            &self,
+            _user_id: u64,
+            _username: String,
+            _url: String,
+        ) -> DatabaseResult<()> {
+            if self.should_fail {
+                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+        async fn select_random_gif(&self) -> DatabaseResult<(u64, String)> {
+            Ok((0, "".to_string())) // Not used in submit logic
+        }
+    }
+
+    struct MockGifValidator {
+        should_fail: bool,
+    }
+
+    #[async_trait]
+    impl GifValidator for MockGifValidator {
+        async fn validate(&self, _url: &str) -> Result<(), UrlValidationError> {
+            if self.should_fail {
+                Err(UrlValidationError::InvalidScheme)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_gif_success() {
+        let db = MockGotdDB { should_fail: false };
+        let validator = MockGifValidator { should_fail: false };
+        let result = submit_gif_logic(
+            "https://example.com/image.gif".to_string(),
+            123,
+            "user".to_string(),
+            &db,
+            &validator,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn submit_gif_validation_failure() {
+        let db = MockGotdDB { should_fail: false };
+        let validator = MockGifValidator { should_fail: true };
+        let result = submit_gif_logic(
+            "bad_url".to_string(),
+            123,
+            "user".to_string(),
+            &db,
+            &validator,
+        )
+        .await;
+        // Expecting UrlValidationError converted to CommandError
+        assert!(matches!(result, Err(CommandError::UrlValidation(_))));
+    }
+
+    #[tokio::test]
+    async fn submit_gif_db_failure() {
+        let db = MockGotdDB { should_fail: true };
+        let validator = MockGifValidator { should_fail: false };
+        let result = submit_gif_logic(
+            "https://example.com/image.gif".to_string(),
+            123,
+            "user".to_string(),
+            &db,
+            &validator,
+        )
+        .await;
+        // Expecting DatabaseError converted to CommandError
+        assert!(matches!(result, Err(CommandError::Database(_))));
+    }
+}

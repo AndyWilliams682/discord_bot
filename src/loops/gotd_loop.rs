@@ -79,3 +79,42 @@ fn next_nine_am(now: chrono::DateTime<Local>) -> chrono::DateTime<Local> {
             .unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Datelike, TimeZone, Timelike};
+
+    #[test]
+    fn next_nine_am_before_time() {
+        // Today at 10:00 (HOUR_TO_RUN is 17)
+        let now = Local.with_ymd_and_hms(2023, 10, 27, 10, 0, 0).unwrap();
+        let next = next_nine_am(now);
+
+        // Should be Today at 17:00
+        assert_eq!(next.day(), 27);
+        assert_eq!(next.hour(), HOUR_TO_RUN);
+    }
+
+    #[test]
+    fn next_nine_am_after_time() {
+        // Today at 20:00 (HOUR_TO_RUN is 17)
+        let now = Local.with_ymd_and_hms(2023, 10, 27, 20, 0, 0).unwrap();
+        let next = next_nine_am(now);
+
+        // Should be Tomorrow (28th) at 17:00
+        assert_eq!(next.day(), 28);
+        assert_eq!(next.hour(), HOUR_TO_RUN);
+    }
+
+    #[test]
+    fn next_nine_am_at_start_of_day() {
+        // Today at 00:00
+        let now = Local.with_ymd_and_hms(2023, 10, 27, 0, 0, 0).unwrap();
+        let next = next_nine_am(now);
+
+        // Should be Today at 17:00
+        assert_eq!(next.day(), 27);
+        assert_eq!(next.hour(), HOUR_TO_RUN);
+    }
+}
