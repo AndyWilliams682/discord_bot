@@ -16,6 +16,8 @@ mod services;
 
 use database::{establish_connection, BotDatabase, DbPoolWrapper};
 
+const DATABASE_LOCATION: &str = "/usr/local/bin/data/mtg_secret_santa.bin";
+
 struct Handler {
     is_loop_running: AtomicBool,
     config: HashMap<String, String>,
@@ -177,7 +179,7 @@ async fn main() {
 
     {
         let mut data = client.data.write().await;
-        let db_pool = establish_connection("/usr/local/bin/data/mtg_secret_santa.bin");
+        let db_pool = establish_connection(DATABASE_LOCATION);
         data.insert::<DbPoolWrapper>(Arc::new(db_pool));
     }
 
