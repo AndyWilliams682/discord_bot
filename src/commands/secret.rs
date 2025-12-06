@@ -266,3 +266,118 @@ async fn notify_participants(ctx: &Context, assignments: &Assignments) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::DatabaseError;
+
+    #[derive(Clone)]
+    struct MockSecretDB {
+        should_fail: bool,
+    }
+
+    #[async_trait]
+    impl SecretSantaTrait for MockSecretDB {
+        fn get_latest_giftee(&self, user_id: u64) -> DatabaseResult<Assignee> {
+            if self.should_fail {
+                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
+            } else if user_id == 1 {
+                Ok(Some(2))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn start_new_event(&self) -> DatabaseResult<()> {
+            if self.should_fail {
+                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn is_event_open(&self) -> DatabaseResult<bool> {
+            Ok(true)
+        }
+
+        fn toggle_event_participation(
+            &self,
+            _user_id: u64,
+            _username: String,
+        ) -> DatabaseResult<ParticipantUpdate> {
+            if self.should_fail {
+                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
+            } else {
+                Ok(ParticipantUpdate::new(
+                    1,
+                    ToggledParticipation::UserJoined(1),
+                ))
+            }
+        }
+
+        fn get_drawn_names(&self) -> DatabaseResult<Assignments> {
+            if self.should_fail {
+                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
+            } else {
+                Ok(vec![(1, 2), (2, 1)])
+            }
+        }
+    }
+
+    #[test]
+    fn test_check_assignment_validation_derangement() {
+        // [0, 1, 2] -> 0 maps to 0 -> Invalid
+        let invalid_perm = vec![0, 1, 2];
+        let restrictions = vec![[9, 9, 9], [9, 9, 9], [9, 9, 9]]; // Dummy restrictions
+        assert!(!check_assignment_validation(&invalid_perm, &restrictions));
+
+        // [1, 2, 0] -> 0->1, 1->2, 2->0 -> Valid derangement
+        let valid_perm = vec![1, 2, 0];
+        assert!(check_assignment_validation(&valid_perm, &restrictions));
+    }
+
+    #[test]
+    fn test_start_new_event_logic() {
+        let db = MockSecretDB { should_fail: false };
+        let result = start_new_event_logic(&db);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().content, "New event has begun!");
+    }
+
+    #[test]
+    fn test_toggle_event_participation_logic() {
+        let db = MockSecretDB { should_fail: false };
+        let result = toggle_event_participation_logic(1, "user".to_string(), &db);
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert!(response.content.contains("has joined the event"));
+    }
+
+    #[test]
+    fn test_admin_response() {
+        let response = admin_response();
+        assert!(response.is_ok());
+        let data = response.unwrap();
+        assert_eq!(data.content, "Hello admin!");
+        assert!(data.buttons.contains(&"start_new_event".to_string()));
+    }
+
+    #[test]
+    fn test_user_response_found() {
+        let db = MockSecretDB { should_fail: false };
+        // User 1 has giftee 2
+        let result = user_response(1, &db);
+        assert!(result.is_ok());
+        assert!(result.unwrap().content.contains("Your giftee is"));
+    }
+
+    #[test]
+    fn test_user_response_not_found() {
+        let db = MockSecretDB { should_fail: false };
+        // User 3 has no giftee
+        let result = user_response(3, &db);
+        assert!(result.is_ok());
+        assert!(result.unwrap().content.contains("No giftee found"));
+    }
+}
