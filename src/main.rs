@@ -38,6 +38,10 @@ impl EventHandler for Handler {
         )
         .await;
 
+        let _guild_command = serenity::all::GuildId::new(101)
+            .set_commands(&ctx.http, vec![commands::integration_test::register()])
+            .await;
+
         let loop_ctx = Arc::new(ctx);
 
         if !self.is_loop_running.load(Ordering::Relaxed) {
@@ -76,6 +80,7 @@ impl EventHandler for Handler {
                         let db = BotDatabase::new((*pool).as_ref().clone());
                         commands::gotd::run(&command.data.options, &command.user, &db).await
                     }
+                    "integration_test" => commands::integration_test::run(&command.data.options),
                     _ => Ok(CreateInteractionResponseMessage::new()
                         .content("not implemented :(")
                         .ephemeral(true)),
@@ -116,6 +121,9 @@ impl EventHandler for Handler {
                             &component.user,
                             &db,
                         )
+                    }
+                    "test_button_success" | "test_button_danger" => {
+                        commands::integration_test::button_handler(&component.data.custom_id)
                     }
                     _ => Ok(CreateInteractionResponseMessage::new()
                         .content("How did you even invoke this?")
