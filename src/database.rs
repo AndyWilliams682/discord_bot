@@ -358,3 +358,94 @@ impl SecretSantaTrait for BotDatabase {
         Ok(assignments)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_test_db() -> BotDatabase {
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::new(manager).unwrap();
+        let db = BotDatabase::new(pool);
+
+        db.pool
+            .get()
+            .unwrap()
+            .execute_batch(
+                "
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY, 
+                username TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS gifs (
+                submitted_by INTEGER NOT NULL, 
+                url TEXT NOT NULL, 
+                posts INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS events (
+                event_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS participation (
+                event INTEGER NOT NULL, 
+                user INTEGER NOT NULL, 
+                user_giftee INTEGER
+            );
+            ",
+            )
+            .unwrap();
+
+        db
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_retrieve_gif() {
+        let db = setup_test_db();
+
+        db.insert_gif(
+            123,
+            "TestUser".to_string(),
+            "http://example.com/cat.gif".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let (user, url) = db.select_random_gif().await.unwrap();
+        assert_eq!(user, 123);
+        assert_eq!(url, "http://example.com/cat.gif");
+    }
+
+    #[tokio::test]
+    async fn test_secret_santa_flow() {
+        let db = setup_test_db();
+
+        db.start_new_event().unwrap();
+
+        let is_open = db.is_event_open().unwrap();
+        assert!(is_open);
+
+        db.toggle_event_participation(1, "User1".to_string())
+            .unwrap();
+        db.toggle_event_participation(2, "User2".to_string())
+            .unwrap();
+
+        db.pool
+            .get()
+            .unwrap()
+            .execute_batch(
+                "
+            INSERT INTO events (event_id) VALUES (2000);
+            INSERT INTO events (event_id) VALUES (2001);
+            INSERT INTO events (event_id) VALUES (2002);
+        ",
+            )
+            .unwrap();
+
+        let assignments = db.get_drawn_names().unwrap();
+
+        assert_eq!(assignments.len(), 3);
+
+        for (user, giftee) in &assignments {
+            assert_ne!(user, giftee, "User {} was assigned to themselves!", user);
+        }
+    }
+}
