@@ -11,7 +11,7 @@ use thiserror::Error;
 use url::ParseError;
 
 use crate::commands::error::CommandError;
-use crate::database::{DatabaseError, DatabaseResult};
+use crate::database::DatabaseResult;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum UrlValidationError {

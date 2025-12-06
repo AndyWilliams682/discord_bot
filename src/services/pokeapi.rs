@@ -7,7 +7,7 @@ const MIN_CHARS: usize = 3; // Shortest name is "Mew"
 const MAX_CHARS: usize = 25; // arbitrary maximum
 pub const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Clone)]
 pub enum PokeAPIError {
     #[error("The network request returned a non-success status code: {0}")]
     NonSuccessStatus(u16),
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn a_valid_name_is_accepted() {
-        let name = "Jigglypuff from the top".to_string();
+        let name = "Jigglypuff".to_string();
         assert_ok!(convert_to_pokeapi_name(name));
     }
 

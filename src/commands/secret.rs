@@ -8,7 +8,7 @@ use serenity::all::{
 use serenity::prelude::*;
 use tokio::task;
 
-use crate::database::{DatabaseError, DatabaseResult};
+use crate::database::DatabaseResult;
 
 // const SECRET_ADMIN_ID: u64 = 255117530253754378; // My ID
 pub const SECRET_ADMIN_ID: u64 = 248966803139723264; // Grif's ID
