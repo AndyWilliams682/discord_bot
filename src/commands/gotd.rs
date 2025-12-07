@@ -44,7 +44,7 @@ impl From<ToStrError> for UrlValidationError {
 
 #[async_trait]
 pub trait GotdTrait: Send + Sync {
-    async fn insert_gif(&self, user_id: u64, username: String, url: String) -> DatabaseResult<()>;
+    async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()>;
     async fn select_random_gif(&self) -> DatabaseResult<(u64, String)>;
 }
 
@@ -95,15 +95,7 @@ pub async fn run(
     let url_option = &options.get(0).expect("Expected string option").value;
     let content = if let CommandDataOptionValue::String(url) = url_option {
         let validator = RealGifValidator;
-        match submit_gif_logic(
-            url.clone(),
-            invoker.id.get(),
-            invoker.name.clone(),
-            db,
-            &validator,
-        )
-        .await
-        {
+        match submit_gif_logic(url.clone(), invoker.id.get(), db, &validator).await {
             Ok(()) => "Gif submitted, thank you!".to_string(),
             Err(why) => return Err(why),
         }
@@ -129,12 +121,11 @@ pub fn register() -> CreateCommand {
 pub async fn submit_gif_logic(
     url: String,
     invoker_id: u64,
-    invoker_name: String,
     db: &impl GotdTrait,
     validator: &impl GifValidator,
 ) -> Result<(), CommandError> {
     validator.validate(&url).await?;
-    Ok(db.insert_gif(invoker_id, invoker_name, url).await?)
+    Ok(db.insert_gif(invoker_id, url).await?)
 }
 
 #[cfg(test)]
@@ -148,12 +139,7 @@ mod tests {
 
     #[async_trait]
     impl GotdTrait for MockGotdDB {
-        async fn insert_gif(
-            &self,
-            _user_id: u64,
-            _username: String,
-            _url: String,
-        ) -> DatabaseResult<()> {
+        async fn insert_gif(&self, _user_id: u64, _url: String) -> DatabaseResult<()> {
             if self.should_fail {
                 Err(DatabaseError::QueryError("Mock DB Error".to_string()))
             } else {
@@ -187,7 +173,6 @@ mod tests {
         let result = submit_gif_logic(
             "https://example.com/image.gif".to_string(),
             123,
-            "user".to_string(),
             &db,
             &validator,
         )
@@ -199,14 +184,7 @@ mod tests {
     async fn submit_gif_validation_failure() {
         let db = MockGotdDB { should_fail: false };
         let validator = MockGifValidator { should_fail: true };
-        let result = submit_gif_logic(
-            "bad_url".to_string(),
-            123,
-            "user".to_string(),
-            &db,
-            &validator,
-        )
-        .await;
+        let result = submit_gif_logic("bad_url".to_string(), 123, &db, &validator).await;
         // Expecting UrlValidationError converted to CommandError
         assert!(matches!(result, Err(CommandError::UrlValidation(_))));
     }
@@ -218,7 +196,6 @@ mod tests {
         let result = submit_gif_logic(
             "https://example.com/image.gif".to_string(),
             123,
-            "user".to_string(),
             &db,
             &validator,
         )

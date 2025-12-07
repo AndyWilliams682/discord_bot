@@ -75,15 +75,15 @@ impl BotDatabase {
         Self { pool }
     }
 
-    pub fn insert_user(&self, user_id: u64, username: String) -> DatabaseResult<()> {
+    pub fn insert_user(&self, user_id: u64) -> DatabaseResult<()> {
         let pool_clone = self.pool.clone();
         let conn = pool_clone.get()?;
         conn.execute(
             "
-            INSERT OR IGNORE INTO users (user_id, username)
-            VALUES (?1, ?2);
+            INSERT OR IGNORE INTO users (user_id)
+            VALUES (?1);
         ",
-            params![user_id, username],
+            params![user_id],
         )?;
         Ok(())
     }
@@ -141,8 +141,8 @@ impl BotDatabase {
 
 #[async_trait]
 impl GotdTrait for BotDatabase {
-    async fn insert_gif(&self, user_id: u64, username: String, url: String) -> DatabaseResult<()> {
-        self.insert_user(user_id, username.clone())?;
+    async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()> {
+        self.insert_user(user_id)?;
 
         let pool_clone = self.pool.clone();
         tokio::task::spawn_blocking(move || {
@@ -239,16 +239,12 @@ impl SecretSantaTrait for BotDatabase {
         Ok(iter.next().transpose()?.is_some())
     }
 
-    fn toggle_event_participation(
-        &self,
-        user_id: u64,
-        username: String,
-    ) -> DatabaseResult<ParticipantUpdate> {
+    fn toggle_event_participation(&self, user_id: u64) -> DatabaseResult<ParticipantUpdate> {
         if !self.is_event_open()? {
             return Err(DatabaseError::JoinEventError());
         }
 
-        self.insert_user(user_id, username)?;
+        self.insert_user(user_id)?;
 
         let conn = self.pool.get()?;
         let year = current_year();
@@ -455,7 +451,6 @@ mod tests {
                 "
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY, 
-                username TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS gifs (
                 submitted_by INTEGER NOT NULL, 
@@ -481,21 +476,13 @@ mod tests {
     async fn test_insert_and_retrieve_gif() {
         let db = setup_test_db();
 
-        db.insert_gif(
-            123,
-            "TestUser".to_string(),
-            "http://example.com/cat.gif".to_string(),
-        )
-        .await
-        .unwrap();
+        db.insert_gif(123, "http://example.com/cat.gif".to_string())
+            .await
+            .unwrap();
 
-        db.insert_gif(
-            123,
-            "TestUser".to_string(),
-            "http://example.com/posted.gif".to_string(),
-        )
-        .await
-        .unwrap();
+        db.insert_gif(123, "http://example.com/posted.gif".to_string())
+            .await
+            .unwrap();
         db.pool
             .get()
             .unwrap()
@@ -521,10 +508,8 @@ mod tests {
         let is_open = db.is_event_open().unwrap();
         assert!(is_open);
 
-        db.toggle_event_participation(1, "User1".to_string())
-            .unwrap();
-        db.toggle_event_participation(2, "User2".to_string())
-            .unwrap();
+        db.toggle_event_participation(1).unwrap();
+        db.toggle_event_participation(2).unwrap();
 
         db.pool
             .get()

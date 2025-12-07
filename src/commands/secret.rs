@@ -78,11 +78,7 @@ pub trait SecretSantaTrait: Send + Sync {
     fn get_latest_giftee(&self, user_id: u64) -> DatabaseResult<Assignee>;
     fn start_new_event(&self) -> DatabaseResult<()>;
     fn is_event_open(&self) -> DatabaseResult<bool>;
-    fn toggle_event_participation(
-        &self,
-        user_id: u64,
-        username: String,
-    ) -> DatabaseResult<ParticipantUpdate>;
+    fn toggle_event_participation(&self, user_id: u64) -> DatabaseResult<ParticipantUpdate>;
     fn get_drawn_names(&self) -> DatabaseResult<Assignments>;
 }
 
@@ -202,10 +198,9 @@ pub async fn start_new_event_interaction(
 
 pub fn toggle_event_participation_logic(
     user_id: u64,
-    username: String,
     db: &impl SecretSantaTrait,
 ) -> SecretResult<SecretResponse> {
-    let toggled_participation = db.toggle_event_participation(user_id, username)?;
+    let toggled_participation = db.toggle_event_participation(user_id)?;
     Ok(SecretResponse {
         content: toggled_participation.to_string(),
         buttons: vec![],
@@ -216,11 +211,7 @@ pub fn toggle_event_participation_interaction(
     invoker: &User,
     db: &impl SecretSantaTrait,
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
-    response_from_result(toggle_event_participation_logic(
-        invoker.id.get(),
-        invoker.name.clone(),
-        db,
-    ))
+    response_from_result(toggle_event_participation_logic(invoker.id.get(), db))
 }
 
 pub async fn draw_names_interaction(
@@ -301,11 +292,7 @@ mod tests {
             Ok(true)
         }
 
-        fn toggle_event_participation(
-            &self,
-            _user_id: u64,
-            _username: String,
-        ) -> DatabaseResult<ParticipantUpdate> {
+        fn toggle_event_participation(&self, _user_id: u64) -> DatabaseResult<ParticipantUpdate> {
             if self.should_fail {
                 Err(DatabaseError::QueryError("Mock DB Error".to_string()))
             } else {
@@ -348,7 +335,7 @@ mod tests {
     #[test]
     fn test_toggle_event_participation_logic() {
         let db = MockSecretDB { should_fail: false };
-        let result = toggle_event_participation_logic(1, "user".to_string(), &db);
+        let result = toggle_event_participation_logic(1, &db);
         assert!(result.is_ok());
         let response = result.unwrap();
         assert!(response.content.contains("has joined the event"));
