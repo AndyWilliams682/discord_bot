@@ -9,13 +9,13 @@ pub const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum PokeAPIError {
-    #[error("{0}: {1}")]
-    NonSuccessStatus(&str, u16),
+    #[error("{0}: Non-success status code: {1}")]
+    NonSuccessStatus(String, u16),
 
-    #[error("Pokemon not found: {0}")]
+    #[error("{0}: Pokemon not found (how did this happen? Msg me cuz I'm curious)")]
     InvalidContentType(String),
 
-    #[error("Name is not valid for PokeAPI: {0}")]
+    #[error("{0}: Name is not valid for PokeAPI")]
     InvalidPokeAPIName(String),
 }
 
@@ -59,7 +59,7 @@ impl PokeAPIService for RealPokeAPIService {
         let status = response.status();
 
         if !status.is_success() {
-            return Err(PokeAPIError::NonSuccessStatus(api_name, status.as_u16()));
+            return Err(PokeAPIError::NonSuccessStatus(api_name.to_string(), status.as_u16()));
         }
         let parsed = response.json::<Value>().await?;
         Ok(RealPokeAPIService::extract_hidden_ability(&parsed))
