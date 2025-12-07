@@ -10,7 +10,7 @@ pub const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum PokeAPIError {
     #[error("{0}: {1}")]
-    NonSuccessStatus(String, u16),
+    NonSuccessStatus(&str, u16),
 
     #[error("Pokemon not found: {0}")]
     InvalidContentType(String),
