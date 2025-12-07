@@ -9,8 +9,8 @@ pub const NO_HIDDEN_ABILITY: &str = "No Hidden Ability";
 
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum PokeAPIError {
-    #[error("The network request returned a non-success status code: {0}")]
-    NonSuccessStatus(u16),
+    #[error("{0}: {1}")]
+    NonSuccessStatus(String, u16),
 
     #[error("Pokemon not found: {0}")]
     InvalidContentType(String),
@@ -59,7 +59,7 @@ impl PokeAPIService for RealPokeAPIService {
         let status = response.status();
 
         if !status.is_success() {
-            return Err(PokeAPIError::NonSuccessStatus(status.as_u16()));
+            return Err(PokeAPIError::NonSuccessStatus(api_name, status.as_u16()));
         }
         let parsed = response.json::<Value>().await?;
         Ok(RealPokeAPIService::extract_hidden_ability(&parsed))

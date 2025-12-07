@@ -80,7 +80,7 @@ mod tests {
                 "porygon" | "porygon2" | "porygon-z" => Ok("analytic".to_string()),
                 "rotom" => Ok(NO_HIDDEN_ABILITY.to_string()),
                 "golem-alola" => Ok("galvanize".to_string()),
-                "missingno" => Err(PokeAPIError::NonSuccessStatus(404)),
+                "missingno" => Err(PokeAPIError::NonSuccessStatus("missingno", 404)),
                 _ => self.response.clone(),
             }
         }
@@ -141,7 +141,7 @@ mod tests {
     #[tokio::test]
     async fn bad_name_returns_404() {
         let service = MockPokeAPIService {
-            response: Err(PokeAPIError::NonSuccessStatus(404)),
+            response: Err(PokeAPIError::NonSuccessStatus("missingno", 404)),
         };
         let result = hidden_ability::get_hidden_abilities(vec!["MissingNo."], &service).await;
         assert!(result.contains("non-success status code: 404"));
