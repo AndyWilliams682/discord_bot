@@ -40,7 +40,7 @@ impl EventHandler for Handler {
         )
         .await;
 
-        let _guild_command = serenity::all::GuildId::new(101)
+        let _guild_command = serenity::all::GuildId::new(704782281578905670)
             .set_commands(&ctx.http, vec![commands::integration_test::register()])
             .await;
 

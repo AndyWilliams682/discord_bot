@@ -24,7 +24,7 @@ pub fn run(
 }
 
 pub fn register() -> CreateCommand {
-    CreateCommand::new("integration_test").description("Test command for Guild 101 only")
+    CreateCommand::new("integration_test").description("Test command for Private Testing Guild only")
 }
 
 pub fn button_handler(custom_id: &str) -> Result<CreateInteractionResponseMessage, CommandError> {
