@@ -450,7 +450,7 @@ mod tests {
             .execute_batch(
                 "
             CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY, 
+                user_id INTEGER PRIMARY KEY
             );
             CREATE TABLE IF NOT EXISTS gifs (
                 submitted_by INTEGER NOT NULL, 
