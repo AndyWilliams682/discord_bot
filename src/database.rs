@@ -87,6 +87,56 @@ impl BotDatabase {
         )?;
         Ok(())
     }
+
+    fn is_user_participating(
+        &self,
+        conn: &rusqlite::Connection,
+        user_id: u64,
+        event_id: i32,
+    ) -> DatabaseResult<bool> {
+        let mut stmt =
+            conn.prepare("SELECT 1 FROM participation WHERE user = ?1 and event = ?2 LIMIT 1;")?;
+        Ok(stmt.exists(params![user_id, event_id])?)
+    }
+
+    fn get_participant_count(
+        &self,
+        conn: &rusqlite::Connection,
+        event_id: i32,
+    ) -> DatabaseResult<u64> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM participation WHERE event = ?1;",
+            params![event_id],
+            |row| row.get(0),
+        )
+        .map_err(DatabaseError::from)
+    }
+
+    fn add_participant(
+        &self,
+        conn: &rusqlite::Connection,
+        user_id: u64,
+        event_id: i32,
+    ) -> DatabaseResult<()> {
+        conn.execute(
+            "INSERT INTO participation (event, user, user_giftee) VALUES (?1, ?2, NULL);",
+            params![event_id, user_id],
+        )?;
+        Ok(())
+    }
+
+    fn remove_participant(
+        &self,
+        conn: &rusqlite::Connection,
+        user_id: u64,
+        event_id: i32,
+    ) -> DatabaseResult<()> {
+        conn.execute(
+            "DELETE FROM participation WHERE user = ?1 AND event = ?2;",
+            params![user_id, event_id],
+        )?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -113,26 +163,21 @@ impl GotdTrait for BotDatabase {
         let pool_clone = self.pool.clone();
         tokio::task::spawn_blocking(move || -> DatabaseResult<(u64, String)> {
             let conn = pool_clone.get()?;
-
-            let gif_stmt = "
-                SELECT submitted_by, url
-                FROM gifs
-                WHERE gifs.posts = (SELECT MIN(posts) FROM gifs)
-                ORDER BY RANDOM()
-                LIMIT 1;
+            let stmt = "
+                UPDATE gifs
+                SET posts = posts + 1
+                WHERE url = (
+                    SELECT url
+                    FROM gifs
+                    WHERE posts = (SELECT MIN(posts) FROM gifs)
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                )
+                RETURNING submitted_by, url;
             ";
 
             let (gif_submitter, gif_url): (u64, String) =
-                conn.query_row(gif_stmt, params![], |row| Ok((row.get(0)?, row.get(1)?)))?;
-
-            conn.execute(
-                "
-                UPDATE gifs
-                SET posts = posts + 1
-                WHERE url = ?1;
-                ",
-                params![gif_url.clone()],
-            )?;
+                conn.query_row(stmt, params![], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
             Ok((gif_submitter, gif_url))
         })
@@ -165,17 +210,16 @@ impl SecretSantaTrait for BotDatabase {
 
     fn start_new_event(&self) -> DatabaseResult<()> {
         let pool_clone = self.pool.clone();
-        let conn = pool_clone.get()?;
-        conn.execute(
-            // New event in the database
-            "INSERT INTO events (event_id) VALUES (?1)",
-            params![current_year()],
-        )?;
-        conn.execute(
-            // Adding admin to the event
+        let mut conn = pool_clone.get()?;
+        let tx = conn.transaction()?;
+        let year = current_year();
+
+        tx.execute("INSERT INTO events (event_id) VALUES (?1)", params![year])?;
+        tx.execute(
             "INSERT INTO participation (event, user) VALUES (?1, ?2);",
-            params![current_year(), SECRET_ADMIN_ID],
+            params![year, SECRET_ADMIN_ID],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -200,63 +244,28 @@ impl SecretSantaTrait for BotDatabase {
         user_id: u64,
         username: String,
     ) -> DatabaseResult<ParticipantUpdate> {
-        let pool_clone = self.pool.clone();
-
-        let conn = pool_clone.get()?;
         if !self.is_event_open()? {
             return Err(DatabaseError::JoinEventError());
         }
 
         self.insert_user(user_id, username)?;
 
-        let mut stmt = conn.prepare(
-            "
-            SELECT 1
-            FROM participation
-            WHERE user = ?1 and event = ?2
-            LIMIT 1;
-        ",
-        )?;
-        let mut iter = stmt.query_map(params![user_id, current_year()], |_row| Ok(()))?;
+        let conn = self.pool.get()?;
+        let year = current_year();
+        let count = self.get_participant_count(&conn, year)?;
 
-        let mut count_participants_stmt = conn.prepare(
-            "
-            SELECT COUNT(*)
-            FROM participation
-            WHERE event = ?1;
-        ",
-        )?;
-        let total_participants: u64 =
-            count_participants_stmt.query_row(params![current_year()], |row| row.get(0))?;
-
-        match iter.next().transpose()?.is_some() {
-            true => {
-                conn.execute(
-                    "
-                    DELETE FROM participation
-                    WHERE user = ?1 AND event = ?2
-                ",
-                    params![user_id, current_year()],
-                )?;
-
-                Ok(ParticipantUpdate::new(
-                    total_participants,
-                    ToggledParticipation::UserLeft(user_id),
-                ))
-            }
-            false => {
-                conn.execute(
-                    "
-                    INSERT INTO participation (event, user, user_giftee)
-                    VALUES (?1, ?2, NULL);
-                ",
-                    params![current_year(), user_id],
-                )?;
-                Ok(ParticipantUpdate::new(
-                    total_participants,
-                    ToggledParticipation::UserJoined(user_id),
-                ))
-            }
+        if self.is_user_participating(&conn, user_id, year)? {
+            self.remove_participant(&conn, user_id, year)?;
+            Ok(ParticipantUpdate::new(
+                count,
+                ToggledParticipation::UserLeft(user_id),
+            ))
+        } else {
+            self.add_participant(&conn, user_id, year)?;
+            Ok(ParticipantUpdate::new(
+                count,
+                ToggledParticipation::UserJoined(user_id),
+            ))
         }
     }
 
@@ -408,6 +417,24 @@ mod tests {
         )
         .await
         .unwrap();
+
+        db.insert_gif(
+            123,
+            "TestUser".to_string(),
+            "http://example.com/posted.gif".to_string(),
+        )
+        .await
+        .unwrap();
+        db.pool
+            .get()
+            .unwrap()
+            .execute(
+                "
+            UPDATE gifs SET posts = posts + 1 WHERE url = ?1;
+            ",
+                params!["http://example.com/posted.gif"],
+            )
+            .unwrap();
 
         let (user, url) = db.select_random_gif().await.unwrap();
         assert_eq!(user, 123);
