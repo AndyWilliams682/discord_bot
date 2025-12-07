@@ -271,77 +271,12 @@ impl SecretSantaTrait for BotDatabase {
 
     fn get_drawn_names(&self) -> DatabaseResult<Assignments> {
         let conn = self.pool.get()?;
-        let mut prev_years_stmt = conn.prepare(
-            "
-            SELECT event_id
-            FROM events
-            WHERE event_id != ?1
-            ORDER BY event_id DESC
-            LIMIT ?2",
-        )?;
-        let prev_years = prev_years_stmt
-            .query_map(params![current_year(), PREV_RELEVANT_EVENTS], |row| {
-                row.get::<_, i32>(0)
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
 
-        let mut current_participants_stmt = conn.prepare(
-            "
-        SELECT user
-        FROM participation
-        WHERE event = ?1
-    ",
-        )?;
-        let current_participants = current_participants_stmt
-            .query_map(params![current_year()], |row| row.get::<_, u64>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        let num_participants = current_participants.len();
+        let prev_years = get_previous_event_ids(&conn)?;
+        let current_participants = get_current_event_participants(&conn)?;
+        let giftee_history = get_giftee_history(&conn, &current_participants, &prev_years)?;
 
-        let mut giftee_history: Vec<[usize; PREV_RELEVANT_EVENTS]> =
-            vec![[num_participants; PREV_RELEVANT_EVENTS]; num_participants];
-        let mut giftee_history_stmt = conn.prepare(
-            "
-        SELECT user, user_giftee, event
-        FROM participation
-        WHERE event < ?1 AND event >= ?2
-        ORDER BY event DESC
-    ",
-        )?;
-        let giftee_history_iter = giftee_history_stmt
-            .query_map(
-                params![current_year(), prev_years[prev_years.len() - 1]],
-                |row| {
-                    Ok(GifteeHistory {
-                        user: row.get(0)?,
-                        user_giftee: row.get(1)?,
-                        event: row.get(2)?,
-                    })
-                },
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        for previous_participation in giftee_history_iter {
-            let event_idx = (prev_years[0] - previous_participation.event) as usize;
-            if let Some(user_idx) = current_participants
-                .iter()
-                .position(|&x| x == previous_participation.user)
-            {
-                if let Some(giftee_idx) = current_participants
-                    .iter()
-                    .position(|&x| x == previous_participation.user_giftee)
-                {
-                    giftee_history[user_idx][event_idx] = giftee_idx;
-                }
-            }
-        }
-
-        let mut solution: Vec<usize> = (0..current_participants.len()).collect();
-        let mut viable_solution = false;
-        let mut rng = thread_rng();
-        while !viable_solution {
-            solution.shuffle(&mut rng);
-            viable_solution = check_assignment_validation(&solution, &giftee_history);
-        }
+        let solution = solve_assignments(current_participants.len(), &giftee_history);
 
         let assignments: Vec<(u64, u64)> = solution
             .iter()
@@ -354,23 +289,159 @@ impl SecretSantaTrait for BotDatabase {
             })
             .collect();
 
-        for &(participant_id, giftee_id) in assignments.iter() {
-            conn.execute(
-                "
-                UPDATE participation
-                SET user_giftee = ?1
-                WHERE event = ?2 AND user = ?3;
-            ",
-                params![giftee_id, current_year(), participant_id],
-            )?;
-        }
+        save_assignments(&conn, &assignments)?;
+
         Ok(assignments)
     }
+}
+
+fn get_previous_event_ids(conn: &rusqlite::Connection) -> DatabaseResult<Vec<i32>> {
+    let mut stmt = conn.prepare(
+        "
+        SELECT event_id
+        FROM events
+        WHERE event_id != ?1
+        ORDER BY event_id DESC
+        LIMIT ?2",
+    )?;
+    let result = stmt
+        .query_map(params![current_year(), PREV_RELEVANT_EVENTS], |row| {
+            row.get::<_, i32>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(result)
+}
+
+fn get_current_event_participants(conn: &rusqlite::Connection) -> DatabaseResult<Vec<u64>> {
+    let mut stmt = conn.prepare(
+        "
+    SELECT user
+    FROM participation
+    WHERE event = ?1
+",
+    )?;
+    let result = stmt
+        .query_map(params![current_year()], |row| row.get::<_, u64>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(result)
+}
+
+fn get_giftee_history(
+    conn: &rusqlite::Connection,
+    current_participants: &[u64],
+    prev_years: &[i32],
+) -> DatabaseResult<Vec<[usize; PREV_RELEVANT_EVENTS]>> {
+    let num_participants = current_participants.len();
+    let mut giftee_history: Vec<[usize; PREV_RELEVANT_EVENTS]> =
+        vec![[num_participants; PREV_RELEVANT_EVENTS]; num_participants];
+
+    if prev_years.is_empty() {
+        return Ok(giftee_history);
+    }
+
+    let mut stmt = conn.prepare(
+        "
+    SELECT user, user_giftee, event
+    FROM participation
+    WHERE event < ?1 AND event >= ?2
+    ORDER BY event DESC
+",
+    )?;
+    let giftee_history_iter = stmt
+        .query_map(
+            params![current_year(), prev_years[prev_years.len() - 1]],
+            |row| {
+                Ok(GifteeHistory {
+                    user: row.get(0)?,
+                    user_giftee: row.get(1)?,
+                    event: row.get(2)?,
+                })
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for previous_participation in giftee_history_iter {
+        let event_idx = (prev_years[0] - previous_participation.event) as usize;
+        if let Some(user_idx) = current_participants
+            .iter()
+            .position(|&x| x == previous_participation.user)
+        {
+            if let Some(giftee_idx) = current_participants
+                .iter()
+                .position(|&x| x == previous_participation.user_giftee)
+            {
+                giftee_history[user_idx][event_idx] = giftee_idx;
+            }
+        }
+    }
+    Ok(giftee_history)
+}
+
+fn solve_assignments(
+    num_participants: usize,
+    giftee_history: &Vec<[usize; PREV_RELEVANT_EVENTS]>,
+) -> Vec<usize> {
+    let mut solution: Vec<usize> = (0..num_participants).collect();
+    let mut viable_solution = false;
+    let mut rng = thread_rng();
+    while !viable_solution {
+        solution.shuffle(&mut rng);
+        viable_solution = check_assignment_validation(&solution, giftee_history);
+    }
+    solution
+}
+
+fn save_assignments(conn: &rusqlite::Connection, assignments: &[(u64, u64)]) -> DatabaseResult<()> {
+    for &(participant_id, giftee_id) in assignments.iter() {
+        conn.execute(
+            "
+            UPDATE participation
+            SET user_giftee = ?1
+            WHERE event = ?2 AND user = ?3;
+        ",
+            params![giftee_id, current_year(), participant_id],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_solve_assignments_logic() {
+        let num_participants = 5;
+        let mut history = vec![[num_participants; PREV_RELEVANT_EVENTS]; num_participants];
+
+        // Let's say user 0 cannot be gifted to user 1
+        history[0][0] = 1;
+
+        let solution = solve_assignments(num_participants, &history);
+
+        assert_eq!(solution.len(), num_participants);
+        // Ensure everyone is assigned to someone
+        let mut giftees = solution.clone();
+        giftees.sort();
+        let expected: Vec<usize> = (0..num_participants).collect();
+        assert_eq!(giftees, expected);
+
+        // Ensure self-assignment didn't happen (handled by check_assignment_validation)
+        for (i, &giftee) in solution.iter().enumerate() {
+            assert_ne!(i, giftee);
+        }
+
+        // Ideally we should also check if the restriction is respected,
+        // but since we are mocking history and check_assignment_validation
+        // logic is what we rely on, verifying it calls it and finds a valid solution is good.
+        // If check_assignment_validation is working, the solution generated will be valid.
+
+        // Check manually for our restriction
+        assert_ne!(
+            solution[0], 1,
+            "User 0 should not be assigned to User 1 due to history"
+        );
+    }
 
     fn setup_test_db() -> BotDatabase {
         let manager = SqliteConnectionManager::memory();
