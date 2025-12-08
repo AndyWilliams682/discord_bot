@@ -124,8 +124,8 @@ impl EventHandler for Handler {
                             &db,
                         )
                     }
-                    "test_button_success" | "test_button_danger" => {
-                        commands::integration_test::button_handler(&component.data.custom_id)
+                    "test_ha_success" | "test_ha_error" => {
+                        commands::integration_test::button_handler(&component.data.custom_id).await
                     }
                     _ => Ok(CreateInteractionResponseMessage::new()
                         .content("How did you even invoke this?")

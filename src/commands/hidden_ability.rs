@@ -50,7 +50,7 @@ async fn format_hidden_ability(input_name: &str, api_service: &impl PokeAPIServi
     }
 }
 
-async fn get_hidden_abilities(
+pub async fn get_hidden_abilities(
     pokemon_list: Vec<&str>,
     api_service: &impl PokeAPIService,
 ) -> String {
