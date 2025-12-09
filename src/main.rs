@@ -124,8 +124,15 @@ impl EventHandler for Handler {
                             &db,
                         )
                     }
-                    "test_ha_success" | "test_ha_error" => {
-                        commands::integration_test::button_handler(&component.data.custom_id).await
+                    "test_ha_success" | "test_ha_error" | "test_poe_success" | "test_poe_error"
+                    | "test_db_error" => {
+                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        commands::integration_test::button_handler(
+                            &component.data.custom_id,
+                            &self.config,
+                            &db,
+                        )
+                        .await
                     }
                     _ => Ok(CreateInteractionResponseMessage::new()
                         .content("How did you even invoke this?")

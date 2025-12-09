@@ -30,7 +30,7 @@ pub fn register() -> CreateCommand {
         )
 }
 
-fn get_response_content(user_id: u64, config: &HashMap<String, String>) -> String {
+pub fn get_response_content(user_id: u64, config: &HashMap<String, String>) -> String {
     if let Some(account) = config.get(&user_id.to_string()) {
         format!(
             "https://www.pathofexile.com/account/view-profile/{}/characters",
