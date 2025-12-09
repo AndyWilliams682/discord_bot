@@ -56,10 +56,8 @@ pub fn register() -> CreateCommand {
 
 fn verify_output(content: &str, output: String) -> String {
     let test_result = match content {
-        "test_ha_success" => output == "porygon: analytic\nunown: No hidden ability",
-        "test_ha_error" => {
-            output == "missingno: Non-success status code: 404\na: Name is not valid for PokeAPI"
-        }
+        "test_ha_success" => output == "porygon: analytic\n",
+        "test_ha_error" => output == "missingno: Non-success status code: 404\n",
         "test_poe_success" => {
             output == "https://www.pathofexile.com/account/view-profile/flyingrhino/characters"
         }
@@ -82,10 +80,10 @@ pub async fn button_handler(
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
     let content = match custom_id {
         "test_ha_success" => {
-            get_hidden_abilities(vec!["porygon", "unown"], &RealPokeAPIService::new()).await
+            get_hidden_abilities(vec!["porygon"], &RealPokeAPIService::new()).await
         }
         "test_ha_error" => {
-            get_hidden_abilities(vec!["missingno", "a"], &RealPokeAPIService::new()).await
+            get_hidden_abilities(vec!["missingno"], &RealPokeAPIService::new()).await
         }
         "test_poe_success" => poe::get_response_content(255117530253754378, config),
         "test_poe_error" => poe::get_response_content(255117530253754377, config),

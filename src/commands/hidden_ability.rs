@@ -41,12 +41,12 @@ pub fn register() -> CreateCommand {
 async fn format_hidden_ability(input_name: &str, api_service: &impl PokeAPIService) -> String {
     let api_name = match convert_to_pokeapi_name(input_name.to_string()) {
         Ok(name) => name,
-        Err(why) => return why.to_string(),
+        Err(why) => return format!("{}\n", why),
     };
 
     match api_service.get_hidden_ability(&api_name).await {
         Ok(api_output) => format!("{}: {}\n", api_name, api_output),
-        Err(why) => why.to_string(),
+        Err(why) => format!("{}\n", why),
     }
 }
 
