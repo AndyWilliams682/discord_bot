@@ -4,8 +4,8 @@ use reqwest::{
     Client, Url,
 };
 use serenity::all::{
-    CommandDataOption, CommandDataOptionValue, CommandOptionType, CreateCommand,
-    CreateCommandOption, CreateInteractionResponseMessage, User,
+    CommandData, CommandDataOptionValue, CommandOptionType, CreateCommand, CreateCommandOption,
+    CreateInteractionResponseMessage, User,
 };
 use thiserror::Error;
 use url::ParseError;
@@ -88,22 +88,45 @@ impl GifValidator for RealGifValidator {
 }
 
 pub async fn run(
-    options: &[CommandDataOption],
+    data: &CommandData,
     invoker: &User,
     db: &impl GotdTrait,
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
-    let url_option = &options.get(0).expect("Expected string option").value;
-    let content = if let CommandDataOptionValue::String(url) = url_option {
+    let url_option = data
+        .options
+        .iter()
+        .find(|opt| opt.name == "url")
+        .map(|opt| &opt.value);
+
+    let attachment_option = data
+        .options
+        .iter()
+        .find(|opt| opt.name == "file")
+        .map(|opt| &opt.value);
+
+    let url_string = if let Some(CommandDataOptionValue::String(url)) = url_option {
+        Some(url.clone())
+    } else if let Some(CommandDataOptionValue::Attachment(attachment_id)) = attachment_option {
+        data.resolved
+            .attachments
+            .get(attachment_id)
+            .map(|a| a.url.clone())
+    } else {
+        None
+    };
+
+    let content = if let Some(url) = url_string {
         let validator = RealGifValidator;
-        match submit_gif_logic(url.clone(), invoker.id.get(), db, &validator).await {
+        match submit_gif_logic(url, invoker.id.get(), db, &validator).await {
             Ok(()) => "Gif submitted, thank you!".to_string(),
             Err(why) => return Err(why),
         }
     } else {
         return Err(CommandError::InvalidOption(
-            "How did you input a non-string?".to_string(),
+            "Please provide either a url or a file".to_string(),
         ));
     };
+
     Ok(CreateInteractionResponseMessage::new()
         .content(content)
         .ephemeral(true))
@@ -114,7 +137,15 @@ pub fn register() -> CreateCommand {
         .description("Submit a url for for gif of the day")
         .add_option(
             CreateCommandOption::new(CommandOptionType::String, "url", "The url of your gif")
-                .required(true),
+                .required(false),
+        )
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::Attachment,
+                "file",
+                "Upload your gif directly to discord instead!",
+            )
+            .required(false),
         )
 }
 

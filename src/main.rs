@@ -80,7 +80,7 @@ impl EventHandler for Handler {
                     "poe" => commands::poe::run(&command.data.options, &self.config),
                     "gotd" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::gotd::run(&command.data.options, &command.user, &db).await
+                        commands::gotd::run(&command.data, &command.user, &db).await
                     }
                     "integration_test" => commands::integration_test::run(&command.data.options),
                     _ => Ok(CreateInteractionResponseMessage::new()
