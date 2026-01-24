@@ -16,7 +16,7 @@ mod services;
 
 use database::{establish_connection, BotDatabase, DbPoolWrapper};
 
-const DATABASE_LOCATION: &str = "/usr/local/bin/data/mtg_secret_santa.bin";
+const DATABASE_NAME: &str = "mtg_secret_santa";
 
 struct Handler {
     is_loop_running: AtomicBool,
@@ -162,7 +162,9 @@ impl EventHandler for Handler {
 #[tokio::main]
 async fn main() {
     // Configure the client with your Discord bot token in the environment.
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let discord_token =
+        env::var("DISCORD_TOKEN").expect("Expected a discord token in the environment");
+    let data_folder = env::var("DATA_FOLDER").expect("Expected a data folder in the environment");
 
     // If commands need to be removed
     // use serenity::http::client::Http;
@@ -171,7 +173,7 @@ async fn main() {
     // println!("{:?}", delete_command);
 
     // Build our client.
-    let mut client = Client::builder(token, GatewayIntents::empty())
+    let mut client = Client::builder(discord_token, GatewayIntents::empty())
         .event_handler(Handler {
             is_loop_running: AtomicBool::new(false),
             config: {
@@ -186,7 +188,23 @@ async fn main() {
 
     {
         let mut data = client.data.write().await;
-        let db_pool = establish_connection(DATABASE_LOCATION);
+        println!(
+            "{:?}",
+            env::current_dir()
+                .unwrap()
+                .join(&data_folder)
+                .join(format!("{}.bin", DATABASE_NAME))
+                .to_str()
+                .unwrap()
+        );
+        let db_pool = establish_connection(
+            env::current_dir()
+                .unwrap()
+                .join(&data_folder)
+                .join(format!("{}.bin", DATABASE_NAME))
+                .to_str()
+                .unwrap(),
+        );
         data.insert::<DbPoolWrapper>(Arc::new(db_pool));
     }
 
