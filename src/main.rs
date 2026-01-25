@@ -188,15 +188,6 @@ async fn main() {
 
     {
         let mut data = client.data.write().await;
-        println!(
-            "{:?}",
-            env::current_dir()
-                .unwrap()
-                .join(&data_folder)
-                .join(format!("{}.bin", DATABASE_NAME))
-                .to_str()
-                .unwrap()
-        );
         let db_pool = establish_connection(
             env::current_dir()
                 .unwrap()
