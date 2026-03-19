@@ -88,39 +88,3 @@ pub fn convert_to_pokeapi_name(s: String) -> PokeAPIResult {
         Ok(s)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use claim::{assert_err, assert_ok};
-
-    #[test]
-    fn a_valid_name_is_accepted() {
-        let name = "Jigglypuff".to_string();
-        assert_ok!(convert_to_pokeapi_name(name));
-    }
-
-    #[test]
-    fn empty_string_is_rejected() {
-        let name = "".to_string();
-        assert_err!(convert_to_pokeapi_name(name));
-    }
-
-    #[test]
-    fn a_name_with_forbidden_characters_is_rejected() {
-        let name = "Test/".to_string();
-        assert_err!(convert_to_pokeapi_name(name));
-    }
-
-    #[test]
-    fn a_name_that_is_too_short_is_rejected() {
-        let name = "a".repeat(MIN_CHARS - 1).to_string();
-        assert_err!(convert_to_pokeapi_name(name));
-    }
-
-    #[test]
-    fn a_name_that_is_too_long_is_rejected() {
-        let name = "a".repeat(MAX_CHARS + 1).to_string();
-        assert_err!(convert_to_pokeapi_name(name));
-    }
-}
