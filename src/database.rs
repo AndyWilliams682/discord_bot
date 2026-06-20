@@ -487,4 +487,34 @@ mod tests {
             ToggledParticipation::UserLeft(999)
         ));
     }
+
+    #[test]
+    fn test_solve_assignments_logic() {
+        let num_participants = 5;
+        let mut history = vec![[num_participants; PREV_RELEVANT_EVENTS]; num_participants];
+
+        // Let's say user 0 cannot be gifted to user 1
+        history[0][0] = 1;
+
+        let solution = solve_assignments(num_participants, &history);
+
+        assert_eq!(solution.len(), num_participants);
+        // Ensure everyone is assigned to someone
+        let mut giftees = solution.clone();
+        giftees.sort();
+        let expected: Vec<usize> = (0..num_participants).collect();
+        assert_eq!(giftees, expected);
+
+        // Ensure self-assignment didn't happen (handled by check_assignment_validation)
+        for (i, &giftee) in solution.iter().enumerate() {
+            assert_ne!(i, giftee);
+        }
+
+        // Check manually for our restriction
+        assert_ne!(
+            solution[0], 1,
+            "User 0 should not be assigned to User 1 due to history"
+        );
+    }
 }
+
