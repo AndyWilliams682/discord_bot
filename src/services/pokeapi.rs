@@ -59,7 +59,10 @@ impl PokeAPIService for RealPokeAPIService {
         let status = response.status();
 
         if !status.is_success() {
-            return Err(PokeAPIError::NonSuccessStatus(api_name.to_string(), status.as_u16()));
+            return Err(PokeAPIError::NonSuccessStatus(
+                api_name.to_string(),
+                status.as_u16(),
+            ));
         }
         let parsed = response.json::<Value>().await?;
         Ok(RealPokeAPIService::extract_hidden_ability(&parsed))
@@ -85,6 +88,84 @@ pub fn convert_to_pokeapi_name(s: String) -> PokeAPIResult {
     if is_empty_or_whitespace || is_too_short || is_too_long || contains_forbidden_chars {
         Err(PokeAPIError::InvalidPokeAPIName(s))
     } else {
-        Ok(s)
+        Ok(no_punctuation_s.into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_hidden_ability_found() {
+        let val = json!({
+            "abilities": [
+                {
+                    "is_hidden": false,
+                    "ability": { "name": "overgrow" }
+                },
+                {
+                    "is_hidden": true,
+                    "ability": { "name": "chlorophyll" }
+                }
+            ]
+        });
+        assert_eq!(
+            RealPokeAPIService::extract_hidden_ability(&val),
+            "chlorophyll"
+        );
+    }
+
+    #[test]
+    fn test_extract_hidden_ability_not_found() {
+        let val = json!({
+            "abilities": [
+                {
+                    "is_hidden": false,
+                    "ability": { "name": "levitate" }
+                }
+            ]
+        });
+        assert_eq!(
+            RealPokeAPIService::extract_hidden_ability(&val),
+            NO_HIDDEN_ABILITY
+        );
+    }
+
+    #[test]
+    fn test_convert_to_pokeapi_name_valid() {
+        assert_eq!(
+            convert_to_pokeapi_name("Bulbasaur".to_string()).unwrap(),
+            "bulbasaur"
+        );
+        assert_eq!(
+            convert_to_pokeapi_name("Mr. Mime".to_string()).unwrap(),
+            "mr-mime"
+        );
+        assert_eq!(
+            convert_to_pokeapi_name("Nidoran ♀".to_string()).unwrap(),
+            "nidoran-f"
+        );
+        assert_eq!(
+            convert_to_pokeapi_name("Porygon2".to_string()).unwrap(),
+            "porygon2"
+        );
+        assert_eq!(
+            convert_to_pokeapi_name("Farfetch'd".to_string()).unwrap(),
+            "farfetchd"
+        );
+        assert_eq!(
+            convert_to_pokeapi_name("Type: Null".to_string()).unwrap(),
+            "type-null"
+        );
+    }
+
+    #[test]
+    fn test_convert_to_pokeapi_name_invalid() {
+        assert!(convert_to_pokeapi_name("ab".to_string()).is_err()); // too short
+        assert!(convert_to_pokeapi_name("thisnameiswaytoolongforpokemon".to_string()).is_err()); // too long
+        assert!(convert_to_pokeapi_name("invalid chars!".to_string()).is_err());
+        // invalid characters
     }
 }

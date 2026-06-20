@@ -40,3 +40,26 @@ pub fn get_response_content(user_id: u64, config: &HashMap<String, String>) -> S
         "This user does not have an account linked".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_response_content_found() {
+        let mut config = HashMap::new();
+        config.insert("12345".to_string(), "MyAccountName".to_string());
+        let res = get_response_content(12345, &config);
+        assert_eq!(
+            res,
+            "https://www.pathofexile.com/account/view-profile/MyAccountName/characters"
+        );
+    }
+
+    #[test]
+    fn test_get_response_content_not_found() {
+        let config = HashMap::new();
+        let res = get_response_content(12345, &config);
+        assert_eq!(res, "This user does not have an account linked");
+    }
+}

@@ -201,8 +201,9 @@ impl SecretSantaTrait for BotDatabase {
         ",
         )?;
 
-        match stmt.query_row(params![user_id], |row| row.get::<_, u64>(0)) {
-            Ok(giftee_id) => Ok(Some(giftee_id)),
+        match stmt.query_row(params![user_id], |row| row.get::<_, Option<u64>>(0)) {
+            Ok(Some(giftee_id)) => Ok(Some(giftee_id)),
+            Ok(None) => Ok(None),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(why) => Err(why.into()),
         }
@@ -399,4 +400,91 @@ fn save_assignments(conn: &rusqlite::Connection, assignments: &[(u64, u64)]) -> 
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use r2d2_sqlite::SqliteConnectionManager;
+
+    fn setup_test_db() -> BotDatabase {
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::new(manager).unwrap();
+        let conn = pool.get().unwrap();
+
+        // Setup schema
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS participation (
+                event INTEGER,
+                user INTEGER,
+                user_giftee INTEGER,
+                PRIMARY KEY (event, user)
+            );
+            CREATE TABLE IF NOT EXISTS events (
+                event_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS gifs (
+                submitted_by INTEGER,
+                url TEXT PRIMARY KEY,
+                posts INTEGER
+            );
+        ",
+        )
+        .unwrap();
+
+        BotDatabase::new(pool)
+    }
+
+    #[tokio::test]
+    async fn test_database_insert_user() {
+        let db = setup_test_db();
+        assert!(db.insert_user(12345).is_ok());
+        assert!(db.insert_user(12345).is_ok()); // Should ignore duplicates
+    }
+
+    #[tokio::test]
+    async fn test_database_gotd() {
+        let db = setup_test_db();
+        db.insert_gif(123, "http://example.com/1.gif".to_string())
+            .await
+            .unwrap();
+        db.insert_gif(123, "http://example.com/2.gif".to_string())
+            .await
+            .unwrap();
+
+        let (user, url) = db.select_random_gif().await.unwrap();
+        assert_eq!(user, 123);
+        assert!(url.contains("example.com"));
+    }
+
+    #[test]
+    fn test_database_secret_santa() {
+        let db = setup_test_db();
+
+        // Start new event
+        assert!(db.start_new_event().is_ok());
+        assert!(db.is_event_open().unwrap());
+
+        // toggle_event_participation
+        let update = db.toggle_event_participation(999).unwrap();
+        assert!(matches!(
+            update.latest_change,
+            ToggledParticipation::UserJoined(999)
+        ));
+
+        // Try getting giftee before drawing
+        let giftee = db.get_latest_giftee(999).unwrap();
+        assert!(giftee.is_none());
+
+        // Another toggle will make them leave
+        let update2 = db.toggle_event_participation(999).unwrap();
+        assert!(matches!(
+            update2.latest_change,
+            ToggledParticipation::UserLeft(999)
+        ));
+    }
 }

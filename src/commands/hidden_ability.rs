@@ -45,7 +45,7 @@ async fn format_hidden_ability(input_name: &str, api_service: &impl PokeAPIServi
     };
 
     match api_service.get_hidden_ability(&api_name).await {
-        Ok(api_output) => format!("{}: {}\n", api_name, api_output),
+        Ok(api_output) => format!("{}: {}\n", input_name, api_output),
         Err(why) => format!("{}\n", why),
     }
 }
@@ -59,4 +59,65 @@ pub async fn get_hidden_abilities(
         output.push_str(&format_hidden_ability(input_name, api_service).await);
     }
     output.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::pokeapi::{PokeAPIError, PokeAPIResult};
+    use async_trait::async_trait;
+
+    struct MockPokeAPI {
+        result: PokeAPIResult,
+    }
+
+    #[async_trait]
+    impl PokeAPIService for MockPokeAPI {
+        async fn get_hidden_ability(&self, api_name: &str) -> PokeAPIResult {
+            if api_name == "bulbasaur" {
+                Ok("chlorophyll".to_string())
+            } else {
+                self.result.clone()
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_format_hidden_ability_success() {
+        let api = MockPokeAPI {
+            result: Ok("chlorophyll".to_string()),
+        };
+        let res = format_hidden_ability("Bulbasaur", &api).await;
+        assert_eq!(res, "Bulbasaur: chlorophyll\n");
+    }
+
+    #[tokio::test]
+    async fn test_format_hidden_ability_invalid_name() {
+        let api = MockPokeAPI {
+            result: Ok("chlorophyll".to_string()),
+        };
+        let res = format_hidden_ability("a", &api).await;
+        assert_eq!(res, "a: Name is not valid for PokeAPI\n");
+    }
+
+    #[tokio::test]
+    async fn test_format_hidden_ability_api_error() {
+        let api = MockPokeAPI {
+            result: Err(PokeAPIError::NonSuccessStatus("pikachu".to_string(), 404)),
+        };
+        let res = format_hidden_ability("pikachu", &api).await;
+        assert_eq!(res, "pikachu: Non-success status code: 404\n");
+    }
+
+    #[tokio::test]
+    async fn test_get_hidden_abilities() {
+        let api = MockPokeAPI {
+            result: Ok("chlorophyll".to_string()),
+        };
+        let res = get_hidden_abilities(vec!["Bulbasaur", "a"], &api).await;
+        assert_eq!(
+            res,
+            "Bulbasaur: chlorophyll\na: Name is not valid for PokeAPI\n"
+        );
+    }
 }

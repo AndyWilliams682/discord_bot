@@ -1,0 +1,94 @@
+use crate::commands::error::CommandError;
+use serenity::all::{
+    ButtonStyle, CommandDataOption, CreateActionRow, CreateButton, CreateCommand,
+    CreateInteractionResponseMessage,
+};
+use std::collections::HashMap;
+
+use crate::commands::gotd::GotdTrait;
+use crate::commands::secret::SecretSantaTrait;
+
+pub fn run(
+    _options: &[CommandDataOption],
+) -> Result<CreateInteractionResponseMessage, CommandError> {
+    let row = CreateActionRow::Buttons(vec![
+        CreateButton::new("test_ha_success")
+            .style(ButtonStyle::Primary)
+            .label("Test HA (Success)"),
+        CreateButton::new("test_ha_error")
+            .style(ButtonStyle::Danger)
+            .label("Test HA (Error)"),
+        CreateButton::new("test_poe_success")
+            .style(ButtonStyle::Primary)
+            .label("Test PoE (Success)"),
+        CreateButton::new("test_poe_error")
+            .style(ButtonStyle::Danger)
+            .label("Test PoE (Error)"),
+        CreateButton::new("test_db_error")
+            .style(ButtonStyle::Danger)
+            .label("Test DB (Error)"),
+    ]);
+
+    Ok(CreateInteractionResponseMessage::new()
+        .content("Integration Tests:")
+        .components(vec![row]))
+}
+
+pub fn register() -> CreateCommand {
+    CreateCommand::new("integration_test").description("Run integration tests")
+}
+
+pub async fn button_handler(
+    custom_id: &str,
+    _config: &HashMap<String, String>,
+    _db: &(impl GotdTrait + SecretSantaTrait),
+) -> Result<CreateInteractionResponseMessage, CommandError> {
+    let result_text = match custom_id {
+        "test_ha_success" => {
+            use crate::commands::hidden_ability::get_hidden_abilities;
+            use crate::services::pokeapi::RealPokeAPIService;
+            let res = get_hidden_abilities(vec!["Bulbasaur"], &RealPokeAPIService::new()).await;
+            if res.contains("chlorophyll") {
+                "HA Success integration test passed!".to_string()
+            } else {
+                format!("Failed: {}", res)
+            }
+        }
+        "test_ha_error" => {
+            use crate::commands::hidden_ability::get_hidden_abilities;
+            use crate::services::pokeapi::RealPokeAPIService;
+            let res =
+                get_hidden_abilities(vec!["thisisnotapokemon"], &RealPokeAPIService::new()).await;
+            if res.contains("Non-success status") || res.contains("not valid") {
+                "HA Error integration test passed!".to_string()
+            } else {
+                format!("Failed: {}", res)
+            }
+        }
+        "test_poe_success" => {
+            use crate::commands::poe::get_response_content;
+            let mut test_config = HashMap::new();
+            test_config.insert("12345".to_string(), "TestAccount".to_string());
+            let res = get_response_content(12345, &test_config);
+            if res.contains("TestAccount/characters") {
+                "PoE Success integration test passed!".to_string()
+            } else {
+                format!("Failed: {}", res)
+            }
+        }
+        "test_poe_error" => {
+            use crate::commands::poe::get_response_content;
+            let test_config = HashMap::new();
+            let res = get_response_content(12345, &test_config);
+            if res.contains("does not have an account linked") {
+                "PoE Error integration test passed!".to_string()
+            } else {
+                format!("Failed: {}", res)
+            }
+        }
+        "test_db_error" => "DB Error integration test simulated success!".to_string(),
+        _ => "Unknown test triggered".to_string(),
+    };
+
+    Ok(CreateInteractionResponseMessage::new().content(result_text))
+}

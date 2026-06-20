@@ -36,8 +36,8 @@ pub struct GifteeHistory {
 }
 
 pub struct ParticipantUpdate {
-    total_participants: u64,
-    latest_change: ToggledParticipation,
+    pub total_participants: u64,
+    pub latest_change: ToggledParticipation,
 }
 
 impl ParticipantUpdate {
@@ -68,6 +68,7 @@ impl ParticipantUpdate {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum ToggledParticipation {
     UserJoined(u64),
     UserLeft(u64),
@@ -255,5 +256,93 @@ async fn notify_participants(ctx: &Context, assignments: &Assignments) {
                 participant_id
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone)]
+    struct MockSecretDB {
+        giftee: Option<u64>,
+        event_open: bool,
+    }
+
+    #[async_trait]
+    impl SecretSantaTrait for MockSecretDB {
+        fn get_latest_giftee(&self, _user_id: u64) -> DatabaseResult<Assignee> {
+            Ok(self.giftee)
+        }
+        fn start_new_event(&self) -> DatabaseResult<()> {
+            Ok(())
+        }
+        fn is_event_open(&self) -> DatabaseResult<bool> {
+            Ok(self.event_open)
+        }
+        fn toggle_event_participation(&self, user_id: u64) -> DatabaseResult<ParticipantUpdate> {
+            Ok(ParticipantUpdate::new(
+                1,
+                ToggledParticipation::UserJoined(user_id),
+            ))
+        }
+        fn get_drawn_names(&self) -> DatabaseResult<Assignments> {
+            Ok(vec![(1, 2), (2, 1)])
+        }
+    }
+
+    #[test]
+    fn test_admin_response() {
+        let res = admin_response().unwrap();
+        assert_eq!(res.content, "Hello admin!");
+        assert_eq!(res.buttons, vec!["start_new_event", "draw_names"]);
+    }
+
+    #[test]
+    fn test_user_response_with_giftee() {
+        let db = MockSecretDB {
+            giftee: Some(123),
+            event_open: true,
+        };
+        let res = user_response(1, &db).unwrap();
+        assert_eq!(res.content, "Your giftee is <@123>");
+        assert!(res.buttons.is_empty());
+    }
+
+    #[test]
+    fn test_user_response_without_giftee() {
+        let db = MockSecretDB {
+            giftee: None,
+            event_open: true,
+        };
+        let res = user_response(1, &db).unwrap();
+        assert_eq!(
+            res.content,
+            "No giftee found - are you a participant for this event?"
+        );
+        assert!(res.buttons.is_empty());
+    }
+
+    #[test]
+    fn test_check_assignment_validation_valid() {
+        let permutation = vec![1, 2, 0];
+        let restrictions = vec![[3, 3, 3], [3, 3, 3], [3, 3, 3]];
+        assert!(check_assignment_validation(&permutation, &restrictions));
+    }
+
+    #[test]
+    fn test_check_assignment_validation_self_assignment() {
+        let permutation = vec![0, 2, 1]; // 0 is assigned to 0
+        let restrictions = vec![[3, 3, 3], [3, 3, 3], [3, 3, 3]];
+        assert!(!check_assignment_validation(&permutation, &restrictions));
+    }
+
+    #[test]
+    fn test_get_button_label() {
+        assert_eq!(get_button_label("draw_names"), "Draw Names");
+        assert_eq!(
+            get_button_label("unknown_button"),
+            "How did you conjure this??"
+        );
     }
 }
