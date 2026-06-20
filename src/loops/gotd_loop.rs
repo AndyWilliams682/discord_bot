@@ -118,3 +118,4 @@ mod tests {
         assert_eq!(next.hour(), HOUR_TO_RUN);
     }
 }
+

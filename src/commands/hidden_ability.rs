@@ -45,7 +45,7 @@ async fn format_hidden_ability(input_name: &str, api_service: &impl PokeAPIServi
     };
 
     match api_service.get_hidden_ability(&api_name).await {
-        Ok(api_output) => format!("{}: {}\n", api_name, api_output),
+        Ok(api_output) => format!("{}: {}\n", input_name, api_output),
         Err(why) => format!("{}\n", why),
     }
 }
@@ -63,87 +63,61 @@ pub async fn get_hidden_abilities(
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::hidden_ability;
-    use crate::services::pokeapi::{
-        PokeAPIError, PokeAPIResult, PokeAPIService, NO_HIDDEN_ABILITY,
-    };
+    use super::*;
+    use crate::services::pokeapi::{PokeAPIError, PokeAPIResult};
     use async_trait::async_trait;
 
-    struct MockPokeAPIService {
-        response: PokeAPIResult,
+    struct MockPokeAPI {
+        result: PokeAPIResult,
     }
 
     #[async_trait]
-    impl PokeAPIService for MockPokeAPIService {
+    impl PokeAPIService for MockPokeAPI {
         async fn get_hidden_ability(&self, api_name: &str) -> PokeAPIResult {
-            match api_name {
-                "porygon" | "porygon2" | "porygon-z" => Ok("analytic".to_string()),
-                "rotom" => Ok(NO_HIDDEN_ABILITY.to_string()),
-                "golem-alola" => Ok("galvanize".to_string()),
-                "missingno" => Err(PokeAPIError::NonSuccessStatus("missingno".to_string(), 404)),
-                _ => self.response.clone(),
+            if api_name == "bulbasaur" {
+                Ok("chlorophyll".to_string())
+            } else {
+                self.result.clone()
             }
         }
     }
 
     #[tokio::test]
-    async fn porygons_ha_is_analytic() {
-        let service = MockPokeAPIService {
-            response: Ok("".to_string()),
+    async fn test_format_hidden_ability_success() {
+        let api = MockPokeAPI {
+            result: Ok("chlorophyll".to_string()),
         };
-        let result = hidden_ability::get_hidden_abilities(vec!["porygon"], &service).await;
-        assert_eq!("porygon: analytic\n", result);
+        let res = format_hidden_ability("Bulbasaur", &api).await;
+        assert_eq!(res, "Bulbasaur: chlorophyll\n");
     }
 
     #[tokio::test]
-    async fn porygon_family_ha_is_analytic() {
-        let service = MockPokeAPIService {
-            response: Ok("".to_string()),
+    async fn test_format_hidden_ability_invalid_name() {
+        let api = MockPokeAPI {
+            result: Ok("chlorophyll".to_string()),
         };
-        let result = hidden_ability::get_hidden_abilities(
-            vec!["porygon", "porygon2", "porygon-z"],
-            &service,
-        )
-        .await;
+        let res = format_hidden_ability("a", &api).await;
+        assert_eq!(res, "a: Name is not valid for PokeAPI\n");
+    }
+
+    #[tokio::test]
+    async fn test_format_hidden_ability_api_error() {
+        let api = MockPokeAPI {
+            result: Err(PokeAPIError::NonSuccessStatus("pikachu".to_string(), 404)),
+        };
+        let res = format_hidden_ability("pikachu", &api).await;
+        assert_eq!(res, "pikachu: Non-success status code: 404\n");
+    }
+
+    #[tokio::test]
+    async fn test_get_hidden_abilities() {
+        let api = MockPokeAPI {
+            result: Ok("chlorophyll".to_string()),
+        };
+        let res = get_hidden_abilities(vec!["Bulbasaur", "a"], &api).await;
         assert_eq!(
-            "porygon: analytic\nporygon2: analytic\nporygon-z: analytic\n",
-            result
+            res,
+            "Bulbasaur: chlorophyll\na: Name is not valid for PokeAPI\n"
         );
-    }
-
-    #[tokio::test]
-    async fn rotom_has_no_ha() {
-        let service = MockPokeAPIService {
-            response: Ok("".to_string()),
-        };
-        let result = hidden_ability::get_hidden_abilities(vec!["rotom"], &service).await;
-        assert_eq!(format!("rotom: {}\n", NO_HIDDEN_ABILITY), result);
-    }
-
-    #[tokio::test]
-    async fn golem_alola_ha_is_galvanize() {
-        let service = MockPokeAPIService {
-            response: Ok("".to_string()),
-        };
-        let result = hidden_ability::get_hidden_abilities(vec!["golem-alola"], &service).await;
-        assert_eq!("golem-alola: galvanize\n", result);
-    }
-
-    #[tokio::test]
-    async fn invalid_name_is_rejected() {
-        let service = MockPokeAPIService {
-            response: Ok("".to_string()),
-        };
-        let result = hidden_ability::get_hidden_abilities(vec!["./:-"], &service).await;
-        assert!(result.contains("Name is not valid for PokeAPI"));
-    }
-
-    #[tokio::test]
-    async fn bad_name_returns_404() {
-        let service = MockPokeAPIService {
-            response: Err(PokeAPIError::NonSuccessStatus("missingno".to_string(), 404)),
-        };
-        let result = hidden_ability::get_hidden_abilities(vec!["MissingNo."], &service).await;
-        assert!(result.contains("Non-success status code: 404"));
     }
 }

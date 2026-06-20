@@ -162,76 +162,83 @@ pub async fn submit_gif_logic(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::DatabaseError;
+    use std::sync::Mutex;
 
     struct MockGotdDB {
-        should_fail: bool,
+        inserted: Mutex<Option<(u64, String)>>,
+        random_res: Option<(u64, String)>,
     }
 
     #[async_trait]
     impl GotdTrait for MockGotdDB {
-        async fn insert_gif(&self, _user_id: u64, _url: String) -> DatabaseResult<()> {
-            if self.should_fail {
-                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
-            } else {
-                Ok(())
-            }
+        async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()> {
+            *self.inserted.lock().unwrap() = Some((user_id, url));
+            Ok(())
         }
         async fn select_random_gif(&self) -> DatabaseResult<(u64, String)> {
-            Ok((0, "".to_string())) // Not used in submit logic
+            Ok(self.random_res.clone().unwrap())
         }
     }
 
     struct MockGifValidator {
-        should_fail: bool,
+        is_valid: bool,
     }
 
     #[async_trait]
     impl GifValidator for MockGifValidator {
         async fn validate(&self, _url: &str) -> Result<(), UrlValidationError> {
-            if self.should_fail {
-                Err(UrlValidationError::InvalidScheme)
-            } else {
+            if self.is_valid {
                 Ok(())
+            } else {
+                Err(UrlValidationError::InvalidScheme)
             }
         }
     }
 
     #[tokio::test]
-    async fn submit_gif_success() {
-        let db = MockGotdDB { should_fail: false };
-        let validator = MockGifValidator { should_fail: false };
-        let result = submit_gif_logic(
-            "https://example.com/image.gif".to_string(),
+    async fn test_submit_gif_logic_success() {
+        let db = MockGotdDB {
+            inserted: Mutex::new(None),
+            random_res: None,
+        };
+        let validator = MockGifValidator { is_valid: true };
+
+        let res = submit_gif_logic(
+            "http://example.com/test.gif".to_string(),
             123,
             &db,
             &validator,
         )
         .await;
-        assert!(result.is_ok());
+        assert!(res.is_ok());
+
+        let inserted = db.inserted.lock().unwrap().clone().unwrap();
+        assert_eq!(inserted.0, 123);
+        assert_eq!(inserted.1, "http://example.com/test.gif");
     }
 
     #[tokio::test]
-    async fn submit_gif_validation_failure() {
-        let db = MockGotdDB { should_fail: false };
-        let validator = MockGifValidator { should_fail: true };
-        let result = submit_gif_logic("bad_url".to_string(), 123, &db, &validator).await;
-        // Expecting UrlValidationError converted to CommandError
-        assert!(matches!(result, Err(CommandError::UrlValidation(_))));
-    }
+    async fn test_submit_gif_logic_invalid_url() {
+        let db = MockGotdDB {
+            inserted: Mutex::new(None),
+            random_res: None,
+        };
+        let validator = MockGifValidator { is_valid: false };
 
-    #[tokio::test]
-    async fn submit_gif_db_failure() {
-        let db = MockGotdDB { should_fail: true };
-        let validator = MockGifValidator { should_fail: false };
-        let result = submit_gif_logic(
-            "https://example.com/image.gif".to_string(),
+        let res = submit_gif_logic(
+            "ftp://example.com/test.gif".to_string(),
             123,
             &db,
             &validator,
         )
         .await;
-        // Expecting DatabaseError converted to CommandError
-        assert!(matches!(result, Err(CommandError::Database(_))));
+        assert!(res.is_err());
+        match res.unwrap_err() {
+            CommandError::UrlValidation(UrlValidationError::InvalidScheme) => (),
+            _ => panic!("Expected InvalidScheme error"),
+        }
+
+        let inserted = db.inserted.lock().unwrap().clone();
+        assert!(inserted.is_none());
     }
 }

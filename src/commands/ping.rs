@@ -23,4 +23,10 @@ mod tests {
     fn test_get_response_content() {
         assert_eq!(get_response_content(), "Hey, I'm alive!");
     }
+
+    #[test]
+    fn test_run() {
+        let result = run(&[]);
+        assert!(result.is_ok());
+    }
 }

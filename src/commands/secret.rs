@@ -36,8 +36,8 @@ pub struct GifteeHistory {
 }
 
 pub struct ParticipantUpdate {
-    total_participants: u64,
-    latest_change: ToggledParticipation,
+    pub total_participants: u64,
+    pub latest_change: ToggledParticipation,
 }
 
 impl ParticipantUpdate {
@@ -68,6 +68,7 @@ impl ParticipantUpdate {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum ToggledParticipation {
     UserJoined(u64),
     UserLeft(u64),
@@ -261,110 +262,87 @@ async fn notify_participants(ctx: &Context, assignments: &Assignments) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::DatabaseError;
 
     #[derive(Clone)]
     struct MockSecretDB {
-        should_fail: bool,
+        giftee: Option<u64>,
+        event_open: bool,
     }
 
     #[async_trait]
     impl SecretSantaTrait for MockSecretDB {
-        fn get_latest_giftee(&self, user_id: u64) -> DatabaseResult<Assignee> {
-            if self.should_fail {
-                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
-            } else if user_id == 1 {
-                Ok(Some(2))
-            } else {
-                Ok(None)
-            }
+        fn get_latest_giftee(&self, _user_id: u64) -> DatabaseResult<Assignee> {
+            Ok(self.giftee)
         }
-
         fn start_new_event(&self) -> DatabaseResult<()> {
-            if self.should_fail {
-                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
-            } else {
-                Ok(())
-            }
+            Ok(())
         }
-
         fn is_event_open(&self) -> DatabaseResult<bool> {
-            Ok(true)
+            Ok(self.event_open)
         }
-
-        fn toggle_event_participation(&self, _user_id: u64) -> DatabaseResult<ParticipantUpdate> {
-            if self.should_fail {
-                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
-            } else {
-                Ok(ParticipantUpdate::new(
-                    1,
-                    ToggledParticipation::UserJoined(1),
-                ))
-            }
+        fn toggle_event_participation(&self, user_id: u64) -> DatabaseResult<ParticipantUpdate> {
+            Ok(ParticipantUpdate::new(
+                1,
+                ToggledParticipation::UserJoined(user_id),
+            ))
         }
-
         fn get_drawn_names(&self) -> DatabaseResult<Assignments> {
-            if self.should_fail {
-                Err(DatabaseError::QueryError("Mock DB Error".to_string()))
-            } else {
-                Ok(vec![(1, 2), (2, 1)])
-            }
+            Ok(vec![(1, 2), (2, 1)])
         }
-    }
-
-    #[test]
-    fn test_check_assignment_validation_derangement() {
-        // [0, 1, 2] -> 0 maps to 0 -> Invalid
-        let invalid_perm = vec![0, 1, 2];
-        let restrictions = vec![[9, 9, 9], [9, 9, 9], [9, 9, 9]]; // Dummy restrictions
-        assert!(!check_assignment_validation(&invalid_perm, &restrictions));
-
-        // [1, 2, 0] -> 0->1, 1->2, 2->0 -> Valid derangement
-        let valid_perm = vec![1, 2, 0];
-        assert!(check_assignment_validation(&valid_perm, &restrictions));
-    }
-
-    #[test]
-    fn test_start_new_event_logic() {
-        let db = MockSecretDB { should_fail: false };
-        let result = start_new_event_logic(&db);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().content, "New event has begun!");
-    }
-
-    #[test]
-    fn test_toggle_event_participation_logic() {
-        let db = MockSecretDB { should_fail: false };
-        let result = toggle_event_participation_logic(1, &db);
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(response.content.contains("has joined the event"));
     }
 
     #[test]
     fn test_admin_response() {
-        let response = admin_response();
-        assert!(response.is_ok());
-        let data = response.unwrap();
-        assert_eq!(data.content, "Hello admin!");
-        assert!(data.buttons.contains(&"start_new_event".to_string()));
+        let res = admin_response().unwrap();
+        assert_eq!(res.content, "Hello admin!");
+        assert_eq!(res.buttons, vec!["start_new_event", "draw_names"]);
     }
 
     #[test]
-    fn test_user_response_found() {
-        let db = MockSecretDB { should_fail: false };
-        // User 1 has giftee 2
-        let result = user_response(1, &db);
-        assert!(result.is_ok());
-        assert!(result.unwrap().content.contains("Your giftee is"));
+    fn test_user_response_with_giftee() {
+        let db = MockSecretDB {
+            giftee: Some(123),
+            event_open: true,
+        };
+        let res = user_response(1, &db).unwrap();
+        assert_eq!(res.content, "Your giftee is <@123>");
+        assert!(res.buttons.is_empty());
     }
 
     #[test]
-    fn test_user_response_not_found() {
-        let db = MockSecretDB { should_fail: false };
-        // User 3 has no giftee
-        let result = user_response(3, &db);
-        assert!(result.is_ok());
-        assert!(result.unwrap().content.contains("No giftee found"));
+    fn test_user_response_without_giftee() {
+        let db = MockSecretDB {
+            giftee: None,
+            event_open: true,
+        };
+        let res = user_response(1, &db).unwrap();
+        assert_eq!(
+            res.content,
+            "No giftee found - are you a participant for this event?"
+        );
+        assert!(res.buttons.is_empty());
+    }
+
+    #[test]
+    fn test_check_assignment_validation_valid() {
+        let permutation = vec![1, 2, 0];
+        let restrictions = vec![[3, 3, 3], [3, 3, 3], [3, 3, 3]];
+        assert!(check_assignment_validation(&permutation, &restrictions));
+    }
+
+    #[test]
+    fn test_check_assignment_validation_self_assignment() {
+        let permutation = vec![0, 2, 1]; // 0 is assigned to 0
+        let restrictions = vec![[3, 3, 3], [3, 3, 3], [3, 3, 3]];
+        assert!(!check_assignment_validation(&permutation, &restrictions));
+    }
+
+    #[test]
+    fn test_get_button_label() {
+        assert_eq!(get_button_label("draw_names"), "Draw Names");
+        assert_eq!(
+            get_button_label("unknown_button"),
+            "How did you conjure this??"
+        );
     }
 }

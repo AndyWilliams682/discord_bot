@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use rand::{distributions::WeightedIndex, rngs::StdRng, SeedableRng, prelude::Distribution};
-use serenity::{prelude::Context, gateway::ActivityData};
+use rand::{distributions::WeightedIndex, prelude::Distribution, rngs::StdRng, SeedableRng};
+use serenity::{gateway::ActivityData, prelude::Context};
 
 const STATUS_UPDATE_TIMER_SECS: u64 = 3600;
 
@@ -22,7 +22,7 @@ async fn set_status(ctx: Arc<Context>) {
         "a Mountain",
         "a Forest",
         "a Wastes",
-        "a... Water Energy??"
+        "a... Water Energy??",
     ];
 
     let status_weights = [17, 17, 17, 17, 17, 10, 5];
