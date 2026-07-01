@@ -75,6 +75,32 @@ impl BotDatabase {
         Self { pool }
     }
 
+    pub fn initialize(&self) -> DatabaseResult<()> {
+        let conn = self.pool.get()?;
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS participation (
+                event INTEGER,
+                user INTEGER,
+                user_giftee INTEGER,
+                PRIMARY KEY (event, user)
+            );
+            CREATE TABLE IF NOT EXISTS events (
+                event_id INTEGER PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS gifs (
+                submitted_by INTEGER,
+                url TEXT PRIMARY KEY,
+                posts INTEGER
+            );
+        ",
+        )?;
+        Ok(())
+    }
+
     pub fn insert_user(&self, user_id: u64) -> DatabaseResult<()> {
         let pool_clone = self.pool.clone();
         let conn = pool_clone.get()?;
@@ -410,33 +436,9 @@ mod tests {
     fn setup_test_db() -> BotDatabase {
         let manager = SqliteConnectionManager::memory();
         let pool = Pool::new(manager).unwrap();
-        let conn = pool.get().unwrap();
-
-        // Setup schema
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS participation (
-                event INTEGER,
-                user INTEGER,
-                user_giftee INTEGER,
-                PRIMARY KEY (event, user)
-            );
-            CREATE TABLE IF NOT EXISTS events (
-                event_id INTEGER PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS gifs (
-                submitted_by INTEGER,
-                url TEXT PRIMARY KEY,
-                posts INTEGER
-            );
-        ",
-        )
-        .unwrap();
-
-        BotDatabase::new(pool)
+        let db = BotDatabase::new(pool);
+        db.initialize().unwrap();
+        db
     }
 
     #[tokio::test]
@@ -515,6 +517,25 @@ mod tests {
             solution[0], 1,
             "User 0 should not be assigned to User 1 due to history"
         );
+    }
+
+    #[test]
+    fn test_database_file_initialization() {
+        let temp_file = std::env::temp_dir().join(format!("test_discord_bot_db_{}.bin", rand::random::<u32>()));
+        if temp_file.exists() {
+            let _ = std::fs::remove_file(&temp_file);
+        }
+        let pool = establish_connection(temp_file.to_str().unwrap());
+        let db = BotDatabase::new(pool);
+        
+        // Assert table creation works on a fresh file
+        assert!(db.initialize().is_ok());
+        
+        // Assert that calling initialize again on an existing database succeeds without error
+        assert!(db.initialize().is_ok());
+        
+        // Clean up
+        let _ = std::fs::remove_file(temp_file);
     }
 }
 
