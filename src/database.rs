@@ -151,7 +151,7 @@ impl GotdTrait for BotDatabase {
             conn.execute(
                 "
                 INSERT INTO gifs (submitted_by, url, posts)
-                VALUES (?1, ?2, 0);
+                VALUES (?1, ?2, (SELECT MIN(posts) FROM gifs));
             ",
                 params![user_id, url],
             )?;
