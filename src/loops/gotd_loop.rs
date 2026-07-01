@@ -28,9 +28,9 @@ pub fn start(ctx: Arc<Context>, db: BotDatabase) {
 
 async fn post_gotd(ctx: Arc<Context>, db: &impl GotdTrait) {
     let content = match db.select_random_gif().await {
-        Ok((submitter, url)) => format!(
+        Ok((submitter, name)) => format!(
             "{} Submitted by {}",
-            url,
+            name,
             UserId::new(submitter).mention().to_string()
         ),
         Err(why) => format!("Error posting GotD: {}", why),

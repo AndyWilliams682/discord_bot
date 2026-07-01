@@ -46,7 +46,7 @@ impl From<ToStrError> for UrlValidationError {
 
 #[async_trait]
 pub trait GotdTrait: Send + Sync {
-    async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()>;
+    async fn insert_gif(&self, user_id: u64, name: String) -> DatabaseResult<()>;
     async fn select_random_gif(&self) -> DatabaseResult<(u64, String)>;
 }
 
@@ -293,8 +293,12 @@ pub async fn submit_gif_logic(
     downloader: &impl FileDownloader,
 ) -> Result<(), CommandError> {
     let saved_path = submission.save_to_file(custom_name, downloader).await?;
-    let path_str = saved_path.to_str().ok_or_else(|| CommandError::Generic("Invalid path".to_string()))?.to_string();
-    Ok(db.insert_gif(invoker_id, path_str).await?)
+    let stem = saved_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| CommandError::Generic("Invalid file name".to_string()))?
+        .to_string();
+    Ok(db.insert_gif(invoker_id, stem).await?)
 }
 
 #[cfg(test)]
@@ -309,8 +313,8 @@ mod tests {
 
     #[async_trait]
     impl GotdTrait for MockGotdDB {
-        async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()> {
-            *self.inserted.lock().unwrap() = Some((user_id, url));
+        async fn insert_gif(&self, user_id: u64, name: String) -> DatabaseResult<()> {
+            *self.inserted.lock().unwrap() = Some((user_id, name));
             Ok(())
         }
         async fn select_random_gif(&self) -> DatabaseResult<(u64, String)> {
@@ -371,10 +375,10 @@ mod tests {
 
         let inserted = db.inserted.lock().unwrap().clone().unwrap();
         assert_eq!(inserted.0, 123);
-        assert!(inserted.1.contains("my_test_gif.gif"));
+        assert_eq!(inserted.1, "my_test_gif");
 
         // Clean up
-        let path = std::path::Path::new(&inserted.1);
+        let path = std::path::Path::new(GIF_DIRECTORY).join("my_test_gif.gif");
         if path.exists() {
             let _ = std::fs::remove_file(path);
         }
@@ -409,10 +413,10 @@ mod tests {
 
         let inserted = db.inserted.lock().unwrap().clone().unwrap();
         assert_eq!(inserted.0, 123);
-        assert!(inserted.1.contains("original.gif"));
+        assert_eq!(inserted.1, "original");
 
         // Clean up
-        let path = std::path::Path::new(&inserted.1);
+        let path = std::path::Path::new(GIF_DIRECTORY).join("original.gif");
         if path.exists() {
             let _ = std::fs::remove_file(path);
         }

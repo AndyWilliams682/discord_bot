@@ -93,7 +93,7 @@ impl BotDatabase {
             );
             CREATE TABLE IF NOT EXISTS gifs (
                 submitted_by INTEGER,
-                url TEXT PRIMARY KEY,
+                name TEXT PRIMARY KEY,
                 posts INTEGER
             );
         ",
@@ -167,7 +167,7 @@ impl BotDatabase {
 
 #[async_trait]
 impl GotdTrait for BotDatabase {
-    async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()> {
+    async fn insert_gif(&self, user_id: u64, name: String) -> DatabaseResult<()> {
         self.insert_user(user_id)?;
 
         let pool_clone = self.pool.clone();
@@ -176,10 +176,10 @@ impl GotdTrait for BotDatabase {
 
             conn.execute(
                 "
-                INSERT INTO gifs (submitted_by, url, posts)
+                INSERT INTO gifs (submitted_by, name, posts)
                 VALUES (?1, ?2, 0);
             ",
-                params![user_id, url],
+                params![user_id, name],
             )?;
             Ok(())
         })
@@ -192,20 +192,20 @@ impl GotdTrait for BotDatabase {
             let stmt = "
                 UPDATE gifs
                 SET posts = posts + 1
-                WHERE url = (
-                    SELECT url
+                WHERE name = (
+                    SELECT name
                     FROM gifs
                     WHERE posts = (SELECT MIN(posts) FROM gifs)
                     ORDER BY RANDOM()
                     LIMIT 1
                 )
-                RETURNING submitted_by, url;
+                RETURNING submitted_by, name;
             ";
 
-            let (gif_submitter, gif_url): (u64, String) =
+            let (gif_submitter, gif_name): (u64, String) =
                 conn.query_row(stmt, params![], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
-            Ok((gif_submitter, gif_url))
+            Ok((gif_submitter, gif_name))
         })
         .await?
     }
@@ -451,16 +451,16 @@ mod tests {
     #[tokio::test]
     async fn test_database_gotd() {
         let db = setup_test_db();
-        db.insert_gif(123, "http://example.com/1.gif".to_string())
+        db.insert_gif(123, "gif1".to_string())
             .await
             .unwrap();
-        db.insert_gif(123, "http://example.com/2.gif".to_string())
+        db.insert_gif(123, "gif2".to_string())
             .await
             .unwrap();
 
-        let (user, url) = db.select_random_gif().await.unwrap();
+        let (user, name) = db.select_random_gif().await.unwrap();
         assert_eq!(user, 123);
-        assert!(url.contains("example.com"));
+        assert!(name == "gif1" || name == "gif2");
     }
 
     #[test]
