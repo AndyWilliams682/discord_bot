@@ -196,6 +196,8 @@ async fn main() {
                 .to_str()
                 .unwrap(),
         );
+        let db = BotDatabase::new(db_pool.clone());
+        db.initialize().expect("Failed to initialize database schema");
         data.insert::<DbPoolWrapper>(Arc::new(db_pool));
     }
 
