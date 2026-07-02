@@ -8,6 +8,7 @@ use crate::database::BotDatabase;
 const HOUR_TO_RUN: u32 = 17;
 const GUILD_ID: u64 = 323928878420590592; // 704782281578905670;
 const CHANNEL_NAME: &str = "gif-of-the-day"; // "test";
+const GIF_BASE_URL: &str = "https://gifs.ampersan.de";
 
 pub fn start(ctx: Arc<Context>, db: BotDatabase) {
     let gotd_context = Arc::clone(&ctx);
@@ -28,9 +29,10 @@ pub fn start(ctx: Arc<Context>, db: BotDatabase) {
 
 async fn post_gotd(ctx: Arc<Context>, db: &impl GotdTrait) {
     let content = match db.select_random_gif().await {
-        Ok((submitter, url)) => format!(
-            "{} Submitted by {}",
-            url,
+        Ok((submitter, name)) => format!(
+            "{}/{} Submitted by {}",
+            GIF_BASE_URL,
+            name,
             UserId::new(submitter).mention().to_string()
         ),
         Err(why) => format!("Error posting GotD: {}", why),

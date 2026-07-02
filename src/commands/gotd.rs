@@ -13,6 +13,8 @@ use url::ParseError;
 use crate::commands::error::CommandError;
 use crate::database::DatabaseResult;
 
+const GIF_DIRECTORY: &str = "data/gifs";
+
 #[derive(Debug, Error, PartialEq)]
 pub enum UrlValidationError {
     #[error("The URL must use the HTTP or HTTPS scheme")]
@@ -44,7 +46,7 @@ impl From<ToStrError> for UrlValidationError {
 
 #[async_trait]
 pub trait GotdTrait: Send + Sync {
-    async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()>;
+    async fn insert_gif(&self, user_id: u64, name: String) -> DatabaseResult<()>;
     async fn select_random_gif(&self) -> DatabaseResult<(u64, String)>;
 }
 
@@ -87,6 +89,117 @@ impl GifValidator for RealGifValidator {
     }
 }
 
+#[async_trait]
+pub trait FileDownloader: Send + Sync {
+    async fn download(&self, url: &str) -> Result<Vec<u8>, String>;
+}
+
+pub struct RealFileDownloader;
+
+#[async_trait]
+impl FileDownloader for RealFileDownloader {
+    async fn download(&self, url: &str) -> Result<Vec<u8>, String> {
+        let client = Client::new();
+        let bytes = client.get(url)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(bytes.to_vec())
+    }
+}
+
+#[derive(Debug)]
+pub enum GifSubmission {
+    Url(String),
+    Attachment {
+        url: String,
+        filename: String,
+    },
+}
+
+impl GifSubmission {
+    pub async fn new(
+        url_opt: Option<String>,
+        attachment_opt: Option<(String, String)>,
+        validator: &impl GifValidator,
+    ) -> Result<Self, CommandError> {
+        let submission = if let Some(url) = url_opt {
+            validator.validate(&url).await?;
+            GifSubmission::Url(url)
+        } else if let Some((url, filename)) = attachment_opt {
+            validator.validate(&url).await?;
+            GifSubmission::Attachment { url, filename }
+        } else {
+            return Err(CommandError::InvalidOption(
+                "Please provide either a url or a file".to_string(),
+            ));
+        };
+        Ok(submission)
+    }
+
+    pub async fn save_to_file(
+        &self,
+        custom_name: Option<String>,
+        downloader: &impl FileDownloader,
+    ) -> Result<std::path::PathBuf, CommandError> {
+        let (source_url, original_filename) = match self {
+            GifSubmission::Url(url) => (url, None),
+            GifSubmission::Attachment { url, filename } => (url, Some(filename.as_str())),
+        };
+
+        // Determine extension
+        let extension = if let Some(orig_name) = original_filename {
+            std::path::Path::new(orig_name)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("gif")
+                .to_string()
+        } else {
+            // Try to extract from URL path
+            if let Ok(parsed_url) = Url::parse(source_url) {
+                std::path::Path::new(parsed_url.path())
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("gif")
+                    .to_string()
+            } else {
+                "gif".to_string()
+            }
+        };
+
+        // Determine final filename
+        let dest_filename = if let Some(custom) = custom_name {
+            let has_ext = std::path::Path::new(&custom).extension().is_some();
+            if has_ext {
+                custom
+            } else {
+                format!("{}.{}", custom, extension)
+            }
+        } else if let Some(orig_name) = original_filename {
+            orig_name.to_string()
+        } else {
+            format!("gif_{}.{}", rand::random::<u32>(), extension)
+        };
+
+        let save_dir = std::path::Path::new(GIF_DIRECTORY);
+        std::fs::create_dir_all(save_dir)
+            .map_err(|e| CommandError::Generic(format!("Failed to create directories: {}", e)))?;
+
+        let dest_path = save_dir.join(dest_filename);
+
+        let bytes = downloader.download(source_url).await
+            .map_err(|e| CommandError::Generic(format!("Failed to download file: {}", e)))?;
+
+        std::fs::write(&dest_path, bytes)
+            .map_err(|e| CommandError::Generic(format!("Failed to write file: {}", e)))?;
+
+        Ok(dest_path)
+    }
+}
+
 pub async fn run(
     data: &CommandData,
     invoker: &User,
@@ -104,32 +217,47 @@ pub async fn run(
         .find(|opt| opt.name == "file")
         .map(|opt| &opt.value);
 
-    let url_string = if let Some(CommandDataOptionValue::String(url)) = url_option {
-        Some(url.clone())
-    } else if let Some(CommandDataOptionValue::Attachment(attachment_id)) = attachment_option {
-        data.resolved
-            .attachments
-            .get(attachment_id)
-            .map(|a| a.url.clone())
-    } else {
-        None
-    };
+    let name_option = data
+        .options
+        .iter()
+        .find(|opt| opt.name == "name")
+        .and_then(|opt| {
+            if let CommandDataOptionValue::String(ref name) = opt.value {
+                Some(name.clone())
+            } else {
+                None
+            }
+        });
 
-    let content = if let Some(url) = url_string {
-        let validator = RealGifValidator;
-        match submit_gif_logic(url, invoker.id.get(), db, &validator).await {
-            Ok(()) => "Gif submitted, thank you!".to_string(),
-            Err(why) => return Err(why),
+    let url_opt = url_option.and_then(|val| {
+        if let CommandDataOptionValue::String(ref url) = val {
+            Some(url.clone())
+        } else {
+            None
         }
-    } else {
-        return Err(CommandError::InvalidOption(
-            "Please provide either a url or a file".to_string(),
-        ));
-    };
+    });
 
-    Ok(CreateInteractionResponseMessage::new()
-        .content(content)
-        .ephemeral(true))
+    let attachment_opt = attachment_option.and_then(|val| {
+        if let CommandDataOptionValue::Attachment(attachment_id) = val {
+            data.resolved
+                .attachments
+                .get(attachment_id)
+                .map(|a| (a.url.clone(), a.filename.clone()))
+        } else {
+            None
+        }
+    });
+
+    let validator = RealGifValidator;
+    let submission = GifSubmission::new(url_opt, attachment_opt, &validator).await?;
+
+    let downloader = RealFileDownloader;
+    match submit_gif_logic(submission, name_option, invoker.id.get(), db, &downloader).await {
+        Ok(()) => Ok(CreateInteractionResponseMessage::new()
+            .content("Gif submitted, thank you!")
+            .ephemeral(true)),
+        Err(why) => Err(why),
+    }
 }
 
 pub fn register() -> CreateCommand {
@@ -147,16 +275,30 @@ pub fn register() -> CreateCommand {
             )
             .required(false),
         )
+        .add_option(
+            CreateCommandOption::new(
+                CommandOptionType::String,
+                "name",
+                "A custom name to save the gif as",
+            )
+            .required(false),
+        )
 }
 
 pub async fn submit_gif_logic(
-    url: String,
+    submission: GifSubmission,
+    custom_name: Option<String>,
     invoker_id: u64,
     db: &impl GotdTrait,
-    validator: &impl GifValidator,
+    downloader: &impl FileDownloader,
 ) -> Result<(), CommandError> {
-    validator.validate(&url).await?;
-    Ok(db.insert_gif(invoker_id, url).await?)
+    let saved_path = submission.save_to_file(custom_name, downloader).await?;
+    let stem = saved_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| CommandError::Generic("Invalid file name".to_string()))?
+        .to_string();
+    Ok(db.insert_gif(invoker_id, stem).await?)
 }
 
 #[cfg(test)]
@@ -171,8 +313,8 @@ mod tests {
 
     #[async_trait]
     impl GotdTrait for MockGotdDB {
-        async fn insert_gif(&self, user_id: u64, url: String) -> DatabaseResult<()> {
-            *self.inserted.lock().unwrap() = Some((user_id, url));
+        async fn insert_gif(&self, user_id: u64, name: String) -> DatabaseResult<()> {
+            *self.inserted.lock().unwrap() = Some((user_id, name));
             Ok(())
         }
         async fn select_random_gif(&self) -> DatabaseResult<(u64, String)> {
@@ -195,6 +337,15 @@ mod tests {
         }
     }
 
+    struct MockFileDownloader;
+
+    #[async_trait]
+    impl FileDownloader for MockFileDownloader {
+        async fn download(&self, _url: &str) -> Result<Vec<u8>, String> {
+            Ok(b"mock_gif_data".to_vec())
+        }
+    }
+
     #[tokio::test]
     async fn test_submit_gif_logic_success() {
         let db = MockGotdDB {
@@ -202,43 +353,90 @@ mod tests {
             random_res: None,
         };
         let validator = MockGifValidator { is_valid: true };
+        let downloader = MockFileDownloader;
+
+        let submission = GifSubmission::new(
+            Some("http://example.com/test.gif".to_string()),
+            None,
+            &validator,
+        )
+        .await
+        .unwrap();
 
         let res = submit_gif_logic(
-            "http://example.com/test.gif".to_string(),
+            submission,
+            Some("my_test_gif".to_string()),
             123,
             &db,
-            &validator,
+            &downloader,
         )
         .await;
         assert!(res.is_ok());
 
         let inserted = db.inserted.lock().unwrap().clone().unwrap();
         assert_eq!(inserted.0, 123);
-        assert_eq!(inserted.1, "http://example.com/test.gif");
+        assert_eq!(inserted.1, "my_test_gif");
+
+        // Clean up
+        let path = std::path::Path::new(GIF_DIRECTORY).join("my_test_gif.gif");
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     #[tokio::test]
-    async fn test_submit_gif_logic_invalid_url() {
+    async fn test_submit_gif_logic_attachment() {
         let db = MockGotdDB {
             inserted: Mutex::new(None),
             random_res: None,
         };
-        let validator = MockGifValidator { is_valid: false };
+        let validator = MockGifValidator { is_valid: true };
+        let downloader = MockFileDownloader;
+
+        let submission = GifSubmission::new(
+            None,
+            Some(("http://example.com/attachment.gif".to_string(), "original.gif".to_string())),
+            &validator,
+        )
+        .await
+        .unwrap();
 
         let res = submit_gif_logic(
-            "ftp://example.com/test.gif".to_string(),
+            submission,
+            None,
             123,
             &db,
+            &downloader,
+        )
+        .await;
+        assert!(res.is_ok());
+
+        let inserted = db.inserted.lock().unwrap().clone().unwrap();
+        assert_eq!(inserted.0, 123);
+        assert_eq!(inserted.1, "original");
+
+        // Clean up
+        let path = std::path::Path::new(GIF_DIRECTORY).join("original.gif");
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_submit_gif_logic_invalid_url() {
+        let validator = MockGifValidator { is_valid: false };
+
+        let res = GifSubmission::new(
+            Some("ftp://example.com/test.gif".to_string()),
+            None,
             &validator,
         )
         .await;
+
         assert!(res.is_err());
         match res.unwrap_err() {
             CommandError::UrlValidation(UrlValidationError::InvalidScheme) => (),
             _ => panic!("Expected InvalidScheme error"),
         }
-
-        let inserted = db.inserted.lock().unwrap().clone();
-        assert!(inserted.is_none());
     }
 }
