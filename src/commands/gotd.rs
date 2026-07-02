@@ -13,7 +13,7 @@ use url::ParseError;
 use crate::commands::error::CommandError;
 use crate::database::DatabaseResult;
 
-const GIF_DIRECTORY: &str = "data/gifs";
+const GIF_DIRECTORY: &str = "/home/ubuntu/bot_data/gifs";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum UrlValidationError {
