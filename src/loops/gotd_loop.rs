@@ -89,8 +89,8 @@ mod tests {
 
     #[test]
     fn next_nine_am_before_time() {
-        // Today at 10:00 (HOUR_TO_RUN is 9)
-        let now = Local.with_ymd_and_hms(2023, 8, 27, 10, 0, 0).unwrap();
+        // Today at 08:00 (HOUR_TO_RUN is 9)
+        let now = Local.with_ymd_and_hms(2023, 10, 27, 8, 0, 0).unwrap();
         let next = next_nine_am(now);
 
         // Should be Today at 09:00
