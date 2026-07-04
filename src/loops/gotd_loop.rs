@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 use crate::commands::gotd::GotdTrait;
 use crate::database::BotDatabase;
 
-const HOUR_TO_RUN: u32 = 17;
+const HOUR_TO_RUN: u32 = 9;
 const GUILD_ID: u64 = 323928878420590592; // 704782281578905670;
 const CHANNEL_NAME: &str = "gif-of-the-day"; // "test";
 const GIF_BASE_URL: &str = "https://gifs.ampersan.de";
