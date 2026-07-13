@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::{env, fs};
 
 use serenity::all::{
-    Command, CreateInteractionResponse, CreateInteractionResponseMessage, Interaction, Ready,
+    Command, CreateInteractionResponse, CreateInteractionResponseMessage, EditInteractionResponse,
+    Interaction, Ready,
 };
 use serenity::async_trait;
 use serenity::prelude::*;
@@ -17,6 +18,17 @@ mod services;
 use database::{establish_connection, BotDatabase, DbPoolWrapper};
 
 const DATABASE_NAME: &str = "mtg_secret_santa";
+
+/// The two response modes a slash command can use.
+///
+/// - `Immediate` – respond in one shot via `create_response(Message(...))`.
+/// - `Deferred`  – acknowledge first with `Defer`, then follow up with
+///   `edit_response(...)` once the slow work is done. The inner `String`
+///   is the final message content.
+enum CommandResponse {
+    Immediate(CreateInteractionResponseMessage),
+    Deferred(String),
+}
 
 struct Handler {
     is_loop_running: AtomicBool,
@@ -70,37 +82,107 @@ impl EventHandler for Handler {
                     .get::<DbPoolWrapper>()
                     .expect("Expected DbPool in TypeMap");
 
+                // Determine upfront if this command needs a deferred response,
+                // so we can acknowledge within Discord's 3-second window before
+                // any slow processing begins.
+                let is_deferred = matches!(command.data.name.as_str(), "gotd");
+
+                if is_deferred {
+                    if let Err(why) = command
+                        .create_response(
+                            &ctx.http,
+                            CreateInteractionResponse::Defer(
+                                CreateInteractionResponseMessage::new().ephemeral(true),
+                            ),
+                        )
+                        .await
+                    {
+                        println!("Cannot defer interaction: {}", why);
+                        return;
+                    }
+                }
+
+                // Every arm returns Result<CommandResponse, CommandError>.
+                // Deferred commands return Deferred(content); all others return Immediate(msg).
                 let response = match command.data.name.as_str() {
-                    "ping" => commands::ping::run(&command.data.options),
-                    "ha" => commands::hidden_ability::run(&command.data.options).await,
+                    "ping" => commands::ping::run(&command.data.options)
+                        .map(CommandResponse::Immediate),
+                    "ha" => commands::hidden_ability::run(&command.data.options)
+                        .await
+                        .map(CommandResponse::Immediate),
                     "secret" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
                         commands::secret::run(&command.data.options, &command.user, &db)
+                            .map(CommandResponse::Immediate)
                     }
-                    "poe" => commands::poe::run(&command.data.options, &self.config),
+                    "poe" => commands::poe::run(&command.data.options, &self.config)
+                        .map(CommandResponse::Immediate),
                     "gotd" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::gotd::run(&command.data, &command.user, &db).await
+                        commands::gotd::run(&command.data, &command.user, &db)
+                            .await
+                            .map(CommandResponse::Deferred)
                     }
-                    "integration_test" => commands::integration_test::run(&command.data.options),
-                    _ => Ok(CreateInteractionResponseMessage::new()
-                        .content("not implemented :(")
-                        .ephemeral(true)),
+                    "integration_test" => {
+                        commands::integration_test::run(&command.data.options)
+                            .map(CommandResponse::Immediate)
+                    }
+                    _ => Ok(CommandResponse::Immediate(
+                        CreateInteractionResponseMessage::new()
+                            .content("not implemented :(")
+                            .ephemeral(true),
+                    )),
                 };
 
-                let response = match response {
-                    Ok(data) => data,
-                    Err(why) => CreateInteractionResponseMessage::new()
-                        .content(why.to_string())
-                        .ephemeral(true),
-                };
-
-                if let Err(why) = command
-                    .create_response(&ctx.http, CreateInteractionResponse::Message(response))
-                    .await
-                {
-                    println!("Cannot respond to slash command: {}", why);
+                match response {
+                    Ok(CommandResponse::Immediate(msg)) => {
+                        if let Err(why) = command
+                            .create_response(&ctx.http, CreateInteractionResponse::Message(msg))
+                            .await
+                        {
+                            println!("Cannot respond to slash command: {}", why);
+                        }
+                    }
+                    Ok(CommandResponse::Deferred(content)) => {
+                        // Defer was already sent above; just edit with the result.
+                        if let Err(why) = command
+                            .edit_response(
+                                &ctx.http,
+                                EditInteractionResponse::new().content(content),
+                            )
+                            .await
+                        {
+                            println!("Cannot edit deferred response: {}", why);
+                        }
+                    }
+                    Err(why) => {
+                        // Send the error back. Use edit_response if we already deferred,
+                        // otherwise use create_response.
+                        let error_content = why.to_string();
+                        if is_deferred {
+                            if let Err(e) = command
+                                .edit_response(
+                                    &ctx.http,
+                                    EditInteractionResponse::new().content(error_content),
+                                )
+                                .await
+                            {
+                                println!("Cannot send deferred error response: {}", e);
+                            }
+                        } else {
+                            let msg = CreateInteractionResponseMessage::new()
+                                .content(error_content)
+                                .ephemeral(true);
+                            if let Err(e) = command
+                                .create_response(&ctx.http, CreateInteractionResponse::Message(msg))
+                                .await
+                            {
+                                println!("Cannot send error response: {}", e);
+                            }
+                        }
+                    }
                 }
+
             }
             Interaction::Component(component) => {
                 let data = ctx.data.read().await;
