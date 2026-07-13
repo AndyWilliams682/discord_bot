@@ -5,7 +5,7 @@ use reqwest::{
 };
 use serenity::all::{
     CommandData, CommandDataOptionValue, CommandOptionType, CreateCommand, CreateCommandOption,
-    CreateInteractionResponseMessage, User,
+    User,
 };
 use thiserror::Error;
 use url::ParseError;
@@ -204,7 +204,7 @@ pub async fn run(
     data: &CommandData,
     invoker: &User,
     db: &impl GotdTrait,
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+) -> Result<String, CommandError> {
     let url_option = data
         .options
         .iter()
@@ -253,9 +253,7 @@ pub async fn run(
 
     let downloader = RealFileDownloader;
     match submit_gif_logic(submission, name_option, invoker.id.get(), db, &downloader).await {
-        Ok(()) => Ok(CreateInteractionResponseMessage::new()
-            .content("Gif submitted, thank you!")
-            .ephemeral(true)),
+        Ok(()) => Ok("Gif submitted, thank you!".to_string()),
         Err(why) => Err(why),
     }
 }
