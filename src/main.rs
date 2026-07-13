@@ -85,7 +85,7 @@ impl EventHandler for Handler {
                 // Determine upfront if this command needs a deferred response,
                 // so we can acknowledge within Discord's 3-second window before
                 // any slow processing begins.
-                let is_deferred = matches!(command.data.name.as_str(), "gotd");
+                let is_deferred = matches!(command.data.name.as_str(), "gotd" | "ha");
 
                 if is_deferred {
                     if let Err(why) = command
@@ -109,7 +109,7 @@ impl EventHandler for Handler {
                         .map(CommandResponse::Immediate),
                     "ha" => commands::hidden_ability::run(&command.data.options)
                         .await
-                        .map(CommandResponse::Immediate),
+                        .map(CommandResponse::Deferred),
                     "secret" => {
                         let db = BotDatabase::new((*pool).as_ref().clone());
                         commands::secret::run(&command.data.options, &command.user, &db)
