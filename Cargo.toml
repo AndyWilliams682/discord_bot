@@ -18,6 +18,10 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.22"
 async-trait = "0.1"
 thiserror = "2.0"
+dotenvy = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+config = { version = "0.14", features = ["toml"] }
+
 
 [[bin]]
 name = "discord_bot"
