@@ -9,6 +9,8 @@ Create .env
 DISCORD_TOKEN=<TOKEN>
 ```
 
+Update `config.toml` with server IDs, data paths, and `/poe` account links.
+
 Run the docker-compose command:
 ```
 docker-compose -f docker-compose.yml up -d --build
@@ -22,5 +24,5 @@ docker build -t discord_bot .
 
 To run the docker image run:
 ```
-docker run -it --rm --env DISCORD_TOKEN=<TOKEN> --name discord_bot discord_bot 
+docker run -it --rm --env-file .env --name discord_bot discord_bot
 ```
