@@ -182,14 +182,12 @@ async fn main() {
         std::process::exit(1);
     }));
 
-    
-    
     // If commands need to be removed
     // use serenity::http::client::Http;
     // let http_client = Http::new_with_application_id(&token, 704782601273213079);
     // let delete_command = http_client.delete_guild_application_command(323928878420590592, 1049455263440191528).await;
     // println!("{:?}", delete_command);
-    
+
     // Build our client.
     let mut client = Client::builder(&config.discord_token, GatewayIntents::empty())
         .event_handler(Handler {

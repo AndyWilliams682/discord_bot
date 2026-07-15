@@ -423,14 +423,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let temp_dir_str = temp_dir.to_str().unwrap();
 
-        let res = submit_gif_logic(
-            submission,
-            None,
-            123,
-            &db,
-            &downloader,
-            temp_dir_str
-        ).await;
+        let res = submit_gif_logic(submission, None, 123, &db, &downloader, temp_dir_str).await;
         assert!(res.is_ok());
 
         let inserted = db.inserted.lock().unwrap().clone().unwrap();
