@@ -3,13 +3,13 @@ use std::{sync::Arc, time::Duration};
 use rand::{distributions::WeightedIndex, prelude::Distribution, rngs::StdRng, SeedableRng};
 use serenity::{gateway::ActivityData, prelude::Context};
 
-const STATUS_UPDATE_TIMER_SECS: u64 = 3600;
+use crate::config::BotConfig;
 
-pub fn start(ctx: Arc<Context>) {
+pub fn start(ctx: Arc<Context>, config: Arc<BotConfig>) {
     tokio::spawn(async move {
         loop {
             set_status(Arc::clone(&ctx)).await;
-            tokio::time::sleep(Duration::from_secs(STATUS_UPDATE_TIMER_SECS)).await;
+            tokio::time::sleep(Duration::from_secs(config.status_update_time)).await;
         }
     });
 }

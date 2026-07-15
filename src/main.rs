@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::{env, fs};
 
 use serenity::all::{
     Command, CreateInteractionResponse, CreateInteractionResponseMessage, Interaction, Ready,
@@ -10,17 +10,17 @@ use serenity::async_trait;
 use serenity::prelude::*;
 
 mod commands;
+mod config;
 mod database;
 mod loops;
 mod services;
 
+use config::{BotConfig, BotConfigWrapper};
 use database::{establish_connection, BotDatabase, DbPoolWrapper};
-
-const DATABASE_NAME: &str = "mtg_secret_santa";
 
 struct Handler {
     is_loop_running: AtomicBool,
-    config: HashMap<String, String>,
+    poe_accounts: HashMap<String, String>,
 }
 
 #[async_trait]
@@ -52,10 +52,14 @@ impl EventHandler for Handler {
                 .get::<DbPoolWrapper>()
                 .expect("Expected DbPool in TypeMap")
                 .clone();
+            let config = data
+                .get::<BotConfigWrapper>()
+                .expect("Expected BotConfig in TypeMap")
+                .clone();
 
-            loops::status::start(loop_ctx.clone());
-            let db = BotDatabase::new((*pool).clone());
-            loops::gotd_loop::start(loop_ctx.clone(), db);
+            loops::status::start(loop_ctx.clone(), config.clone());
+            let db = BotDatabase::new((*pool).clone(), config.secret_admin_id);
+            loops::gotd_loop::start(loop_ctx.clone(), db, config);
             self.is_loop_running.swap(true, Ordering::Relaxed);
         }
     }
@@ -69,18 +73,27 @@ impl EventHandler for Handler {
                 let pool = data
                     .get::<DbPoolWrapper>()
                     .expect("Expected DbPool in TypeMap");
+                let config = data
+                    .get::<BotConfigWrapper>()
+                    .expect("Expected BotConfig in TypeMap");
 
                 let response = match command.data.name.as_str() {
                     "ping" => commands::ping::run(&command.data.options),
                     "ha" => commands::hidden_ability::run(&command.data.options).await,
                     "secret" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::secret::run(&command.data.options, &command.user, &db)
+                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
+                        commands::secret::run(
+                            &command.data.options,
+                            &command.user,
+                            &db,
+                            config.secret_admin_id,
+                        )
                     }
-                    "poe" => commands::poe::run(&command.data.options, &self.config),
+                    "poe" => commands::poe::run(&command.data.options, &self.poe_accounts),
                     "gotd" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone());
-                        commands::gotd::run(&command.data, &command.user, &db).await
+                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
+                        let gif_directory = format!("{}/gifs", config.data_folder);
+                        commands::gotd::run(&command.data, &command.user, &db, &gif_directory).await
                     }
                     "integration_test" => commands::integration_test::run(&command.data.options),
                     _ => Ok(CreateInteractionResponseMessage::new()
@@ -107,18 +120,21 @@ impl EventHandler for Handler {
                 let pool = data
                     .get::<DbPoolWrapper>()
                     .expect("Expected DbPool in TypeMap");
+                let config = data
+                    .get::<BotConfigWrapper>()
+                    .expect("Expected BotConfig in TypeMap");
 
                 let response = match component.data.custom_id.as_str() {
                     "start_new_event" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
                         commands::secret::start_new_event_interaction(&db).await
                     }
                     "draw_names" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
                         commands::secret::draw_names_interaction(&ctx, db).await
                     }
                     "toggle_event_participation" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
                         commands::secret::toggle_event_participation_interaction(
                             &component.user,
                             &db,
@@ -126,10 +142,10 @@ impl EventHandler for Handler {
                     }
                     "test_ha_success" | "test_ha_error" | "test_poe_success" | "test_poe_error"
                     | "test_db_error" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone());
+                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
                         commands::integration_test::button_handler(
                             &component.data.custom_id,
-                            &self.config,
+                            &self.poe_accounts,
                             &db,
                         )
                         .await
@@ -161,27 +177,24 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
-    // Configure the client with your Discord bot token in the environment.
-    let discord_token =
-        env::var("DISCORD_TOKEN").expect("Expected a discord token in the environment");
-    let data_folder = env::var("DATA_FOLDER").expect("Expected a data folder in the environment");
+    let config = Arc::new(BotConfig::load().unwrap_or_else(|e| {
+        eprintln!("Configuration Error: {}", e);
+        std::process::exit(1);
+    }));
 
+    
+    
     // If commands need to be removed
     // use serenity::http::client::Http;
     // let http_client = Http::new_with_application_id(&token, 704782601273213079);
     // let delete_command = http_client.delete_guild_application_command(323928878420590592, 1049455263440191528).await;
     // println!("{:?}", delete_command);
-
+    
     // Build our client.
-    let mut client = Client::builder(discord_token, GatewayIntents::empty())
+    let mut client = Client::builder(&config.discord_token, GatewayIntents::empty())
         .event_handler(Handler {
             is_loop_running: AtomicBool::new(false),
-            config: {
-                let config_raw =
-                    fs::read_to_string(env::current_dir().unwrap().join("config.json"))
-                        .expect("Unable to read config");
-                serde_json::from_str(&config_raw).unwrap()
-            },
+            poe_accounts: config.poe_accounts.clone(),
         })
         .await
         .expect("Error creating client");
@@ -191,19 +204,19 @@ async fn main() {
         let db_pool = establish_connection(
             env::current_dir()
                 .unwrap()
-                .join(&data_folder)
-                .join(format!("{}.bin", DATABASE_NAME))
+                .join(&config.data_folder)
+                .join(format!("{}.bin", config.database_name))
                 .to_str()
                 .unwrap(),
         );
-        let db = BotDatabase::new(db_pool.clone());
-        db.initialize().expect("Failed to initialize database schema");
+        let db = BotDatabase::new(db_pool.clone(), config.secret_admin_id);
+        db.initialize()
+            .expect("Failed to initialize database schema");
         data.insert::<DbPoolWrapper>(Arc::new(db_pool));
+        data.insert::<BotConfigWrapper>(config.clone());
     }
 
     // Finally, start a single shard, and start listening to events.
-    // Shards will automatically attempt to reconnect, and will perform
-    // exponential backoff until it reconnects.
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
     }

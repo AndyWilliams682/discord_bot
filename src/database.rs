@@ -14,7 +14,6 @@ use crate::commands::gotd::GotdTrait;
 use crate::commands::secret::{
     check_assignment_validation, current_year, Assignee, Assignments, GifteeHistory,
     ParticipantUpdate, SecretSantaTrait, ToggledParticipation, PREV_RELEVANT_EVENTS,
-    SECRET_ADMIN_ID,
 };
 
 pub type DbPool = Pool<SqliteConnectionManager>;
@@ -68,11 +67,15 @@ pub fn establish_connection(db_path: &str) -> DbPool {
 #[derive(Clone)]
 pub struct BotDatabase {
     pool: DbPool,
+    pub secret_admin_id: u64,
 }
 
 impl BotDatabase {
-    pub fn new(pool: DbPool) -> Self {
-        Self { pool }
+    pub fn new(pool: DbPool, secret_admin_id: u64) -> Self {
+        Self {
+            pool,
+            secret_admin_id,
+        }
     }
 
     pub fn initialize(&self) -> DatabaseResult<()> {
@@ -248,7 +251,7 @@ impl SecretSantaTrait for BotDatabase {
         tx.execute("INSERT INTO events (event_id) VALUES (?1)", params![year])?;
         tx.execute(
             "INSERT INTO participation (event, user) VALUES (?1, ?2);",
-            params![year, SECRET_ADMIN_ID],
+            params![year, self.secret_admin_id],
         )?;
         tx.commit()?;
         Ok(())
@@ -440,7 +443,7 @@ mod tests {
     fn setup_test_db() -> BotDatabase {
         let manager = SqliteConnectionManager::memory();
         let pool = Pool::new(manager).unwrap();
-        let db = BotDatabase::new(pool);
+        let db = BotDatabase::new(pool, 248966803139723264);
         db.initialize().unwrap();
         db
     }
@@ -525,21 +528,21 @@ mod tests {
 
     #[test]
     fn test_database_file_initialization() {
-        let temp_file = std::env::temp_dir().join(format!("test_discord_bot_db_{}.bin", rand::random::<u32>()));
+        let temp_file =
+            std::env::temp_dir().join(format!("test_discord_bot_db_{}.bin", rand::random::<u32>()));
         if temp_file.exists() {
             let _ = std::fs::remove_file(&temp_file);
         }
         let pool = establish_connection(temp_file.to_str().unwrap());
-        let db = BotDatabase::new(pool);
-        
+        let db = BotDatabase::new(pool, 248966803139723264);
+
         // Assert table creation works on a fresh file
         assert!(db.initialize().is_ok());
-        
+
         // Assert that calling initialize again on an existing database succeeds without error
         assert!(db.initialize().is_ok());
-        
+
         // Clean up
         let _ = std::fs::remove_file(temp_file);
     }
 }
-
