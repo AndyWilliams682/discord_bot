@@ -13,3 +13,9 @@ gif_base_url = "https://gifs.ampersan.de"
 
 # /secret
 secret_admin_id = 248966803139723264
+
+# /poe
+[poe_accounts]
+"197178692957372417" = "irandms"
+"248966803139723264" = "miget"
+"255117530253754378" = "flyingrhino"
