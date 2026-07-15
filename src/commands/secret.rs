@@ -2,18 +2,18 @@ use async_trait::async_trait;
 use chrono::Datelike;
 use rand::random;
 use serenity::all::{
-    ButtonStyle, CommandDataOption, CreateActionRow, CreateButton, CreateCommand,
-    CreateInteractionResponseMessage, User, UserId,
+    ButtonStyle, CommandDataOption, CommandInteraction, CreateActionRow, CreateButton,
+    CreateCommand, CreateInteractionResponseMessage, User, UserId,
 };
 use serenity::prelude::*;
 use tokio::task;
 
-use crate::database::DatabaseResult;
+use crate::database::{DatabaseResult, BotDatabase};
 
 const WEIGHTS: [f32; 3] = [0.0, 0.0, 0.5];
 pub const PREV_RELEVANT_EVENTS: usize = WEIGHTS.len();
 
-use crate::commands::error::CommandError;
+use crate::commands::{error::CommandError, BotCommand, CommandContext, CommandResponse};
 
 pub type SecretResult<T> = Result<T, CommandError>;
 
@@ -86,7 +86,7 @@ pub fn run(
     invoker: &User,
     db: &impl SecretSantaTrait,
     admin_id: u64,
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+) -> Result<CommandResponse, CommandError> {
     let response_data = if invoker.id.get() == admin_id {
         admin_response()
     } else {
@@ -97,12 +97,10 @@ pub fn run(
 
 fn response_from_result(
     res: SecretResult<SecretResponse>,
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+) -> Result<CommandResponse, CommandError> {
     match res {
         Ok(data) => {
-            let mut response = CreateInteractionResponseMessage::new()
-                .content(data.content)
-                .ephemeral(true);
+            let mut response = CommandResponse::new().content(data.content).ephemeral(true);
             if !data.buttons.is_empty() {
                 let mut row_buttons = Vec::new();
                 for button_id in data.buttons {
@@ -144,6 +142,33 @@ fn user_response(user_id: u64, db: &impl SecretSantaTrait) -> SecretResult<Secre
 
 pub fn register() -> CreateCommand {
     CreateCommand::new("secret").description("See your recipient for secret santa!")
+}
+
+pub struct SecretCommand;
+
+#[async_trait]
+impl BotCommand for SecretCommand {
+    fn name(&self) -> &'static str {
+        "secret"
+    }
+
+    fn register(&self) -> CreateCommand {
+        register()
+    }
+
+    async fn execute(
+        &self,
+        interaction: &CommandInteraction,
+        context: CommandContext<'_>,
+    ) -> Result<CommandResponse, CommandError> {
+        let db = BotDatabase::new(context.pool.clone(), context.config.secret_admin_id);
+        run(
+            &interaction.data.options,
+            &interaction.user,
+            &db,
+            context.config.secret_admin_id,
+        )
+    }
 }
 
 fn get_button_label(button_id: &str) -> &str {
@@ -194,7 +219,7 @@ pub fn start_new_event_logic(db: &impl SecretSantaTrait) -> SecretResult<SecretR
 pub async fn start_new_event_interaction(
     db: &impl SecretSantaTrait,
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
-    response_from_result(start_new_event_logic(db))
+    response_from_result(start_new_event_logic(db)).map(CommandResponse::into_initial_response)
 }
 
 pub fn toggle_event_participation_logic(
@@ -213,6 +238,7 @@ pub fn toggle_event_participation_interaction(
     db: &impl SecretSantaTrait,
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
     response_from_result(toggle_event_participation_logic(invoker.id.get(), db))
+        .map(CommandResponse::into_initial_response)
 }
 
 pub async fn draw_names_interaction(

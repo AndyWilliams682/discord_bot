@@ -1,10 +1,30 @@
-use crate::commands::error::CommandError;
-use serenity::all::{CommandDataOption, CreateCommand, CreateInteractionResponseMessage};
+use crate::commands::{error::CommandError, BotCommand, CommandContext, CommandResponse};
+use serenity::all::{CommandDataOption, CommandInteraction, CreateCommand};
+use serenity::async_trait;
 
-pub fn run(
-    _options: &[CommandDataOption],
-) -> Result<CreateInteractionResponseMessage, CommandError> {
-    Ok(CreateInteractionResponseMessage::new().content(get_response_content()))
+pub struct PingCommand;
+
+#[async_trait]
+impl BotCommand for PingCommand {
+    fn name(&self) -> &'static str {
+        "ping"
+    }
+
+    fn register(&self) -> CreateCommand {
+        register()
+    }
+
+    async fn execute(
+        &self,
+        interaction: &CommandInteraction,
+        _context: CommandContext<'_>,
+    ) -> Result<CommandResponse, CommandError> {
+        run(&interaction.data.options)
+    }
+}
+
+pub fn run(_options: &[CommandDataOption]) -> Result<CommandResponse, CommandError> {
+    Ok(CommandResponse::new().content(get_response_content()))
 }
 
 pub fn register() -> CreateCommand {

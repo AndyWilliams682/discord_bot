@@ -1,13 +1,37 @@
-use crate::commands::error::CommandError;
+use crate::commands::{error::CommandError, BotCommand, CommandContext, CommandResponse};
 use crate::services::pokeapi::{convert_to_pokeapi_name, PokeAPIService, RealPokeAPIService};
 use serenity::all::{
-    CommandDataOption, CommandDataOptionValue, CommandOptionType, CreateCommand,
-    CreateCommandOption, CreateInteractionResponseMessage,
+    CommandDataOption, CommandDataOptionValue, CommandInteraction, CommandOptionType,
+    CreateCommand, CreateCommandOption,
 };
+use serenity::async_trait;
 
-pub async fn run(
-    options: &[CommandDataOption],
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+pub struct HiddenAbilityCommand;
+
+#[async_trait]
+impl BotCommand for HiddenAbilityCommand {
+    fn name(&self) -> &'static str {
+        "ha"
+    }
+
+    fn should_defer(&self) -> bool {
+        true
+    }
+
+    fn register(&self) -> CreateCommand {
+        register()
+    }
+
+    async fn execute(
+        &self,
+        interaction: &CommandInteraction,
+        _context: CommandContext<'_>,
+    ) -> Result<CommandResponse, CommandError> {
+        run(&interaction.data.options).await
+    }
+}
+
+pub async fn run(options: &[CommandDataOption]) -> Result<CommandResponse, CommandError> {
     if let CommandDataOptionValue::String(raw_input) =
         &options.get(0).expect("Expected string option").value
     {
@@ -17,7 +41,7 @@ pub async fn run(
         if content.len() == 0 {
             content = format!("Your input \"{}\" has no valid pokemon", raw_input)
         }
-        Ok(CreateInteractionResponseMessage::new().content(content))
+        Ok(CommandResponse::new().content(content))
     } else {
         Err(CommandError::InvalidOption(
             "How did you input a non-string?".to_string(),

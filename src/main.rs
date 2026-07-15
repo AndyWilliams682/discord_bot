@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serenity::all::{
-    Command, CreateInteractionResponse, CreateInteractionResponseMessage, Interaction, Ready,
+    Command, CommandInteraction, CreateCommand, CreateInteractionResponse,
+    CreateInteractionResponseMessage, Interaction, Ready,
 };
 use serenity::async_trait;
 use serenity::prelude::*;
@@ -23,26 +24,57 @@ struct Handler {
     poe_accounts: HashMap<String, String>,
 }
 
+async fn send_command_response(
+    ctx: &Context,
+    command: &CommandInteraction,
+    response: commands::CommandResponse,
+    deferred: bool,
+) {
+    let result = if deferred {
+        command
+            .edit_response(&ctx.http, response.into_edit_response())
+            .await
+            .map(|_| ())
+    } else {
+        command
+            .create_response(
+                &ctx.http,
+                CreateInteractionResponse::Message(response.into_initial_response()),
+            )
+            .await
+    };
+
+    if let Err(why) = result {
+        println!("Cannot respond to slash command: {}", why);
+    }
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
-        let _global_command = Command::set_global_commands(
-            &ctx.http,
-            vec![
-                commands::ping::register(),
-                commands::hidden_ability::register(),
-                commands::secret::register(),
-                commands::poe::register(),
-                commands::gotd::register(),
-            ],
-        )
-        .await;
+        let registered_commands = commands::all();
+        let mut global_commands = Vec::new();
+        let mut guild_commands: HashMap<u64, Vec<CreateCommand>> = HashMap::new();
 
-        let _guild_command = serenity::all::GuildId::new(704782281578905670)
-            .set_commands(&ctx.http, vec![commands::integration_test::register()])
-            .await;
+        for command in registered_commands.iter() {
+            match command.registration() {
+                commands::CommandRegistration::Global => global_commands.push(command.register()),
+                commands::CommandRegistration::Guild(guild_id) => guild_commands
+                    .entry(guild_id)
+                    .or_default()
+                    .push(command.register()),
+            }
+        }
+
+        let _global_command = Command::set_global_commands(&ctx.http, global_commands).await;
+
+        for (guild_id, commands) in guild_commands {
+            let _guild_command = serenity::all::GuildId::new(guild_id)
+                .set_commands(&ctx.http, commands)
+                .await;
+        }
 
         let loop_ctx = Arc::new(ctx);
 
@@ -69,51 +101,64 @@ impl EventHandler for Handler {
             Interaction::Command(command) => {
                 println!("Received command interaction: {:#?}", command);
 
-                let data = ctx.data.read().await;
-                let pool = data
-                    .get::<DbPoolWrapper>()
-                    .expect("Expected DbPool in TypeMap");
-                let config = data
-                    .get::<BotConfigWrapper>()
-                    .expect("Expected BotConfig in TypeMap");
-
-                let response = match command.data.name.as_str() {
-                    "ping" => commands::ping::run(&command.data.options),
-                    "ha" => commands::hidden_ability::run(&command.data.options).await,
-                    "secret" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
-                        commands::secret::run(
-                            &command.data.options,
-                            &command.user,
-                            &db,
-                            config.secret_admin_id,
-                        )
-                    }
-                    "poe" => commands::poe::run(&command.data.options, &self.poe_accounts),
-                    "gotd" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
-                        let gif_directory = format!("{}/gifs", config.data_folder);
-                        commands::gotd::run(&command.data, &command.user, &db, &gif_directory).await
-                    }
-                    "integration_test" => commands::integration_test::run(&command.data.options),
-                    _ => Ok(CreateInteractionResponseMessage::new()
-                        .content("not implemented :(")
-                        .ephemeral(true)),
+                let (pool, config) = {
+                    let data = ctx.data.read().await;
+                    let pool = data
+                        .get::<DbPoolWrapper>()
+                        .expect("Expected DbPool in TypeMap")
+                        .clone();
+                    let config = data
+                        .get::<BotConfigWrapper>()
+                        .expect("Expected BotConfig in TypeMap")
+                        .clone();
+                    (pool, config)
                 };
+
+                let registered_commands = commands::all();
+                let bot_command = registered_commands
+                    .iter()
+                    .find(|candidate| candidate.name() == command.data.name.as_str());
+
+                let Some(bot_command) = bot_command else {
+                    let response = commands::CommandResponse::new()
+                        .content("not implemented :(")
+                        .ephemeral(true);
+                    send_command_response(&ctx, &command, response, false).await;
+                    return;
+                };
+
+                let deferred = bot_command.should_defer();
+                if deferred {
+                    if let Err(why) = command
+                        .create_response(
+                            &ctx.http,
+                            CreateInteractionResponse::Defer(
+                                CreateInteractionResponseMessage::new().ephemeral(true),
+                            ),
+                        )
+                        .await
+                    {
+                        println!("Cannot defer slash command: {}", why);
+                        return;
+                    }
+                }
+
+                let command_context = commands::CommandContext {
+                    pool: pool.as_ref(),
+                    config: config.as_ref(),
+                    poe_accounts: &self.poe_accounts,
+                };
+
+                let response = bot_command.execute(&command, command_context).await;
 
                 let response = match response {
                     Ok(data) => data,
-                    Err(why) => CreateInteractionResponseMessage::new()
+                    Err(why) => commands::CommandResponse::new()
                         .content(why.to_string())
                         .ephemeral(true),
                 };
 
-                if let Err(why) = command
-                    .create_response(&ctx.http, CreateInteractionResponse::Message(response))
-                    .await
-                {
-                    println!("Cannot respond to slash command: {}", why);
-                }
+                send_command_response(&ctx, &command, response, deferred).await;
             }
             Interaction::Component(component) => {
                 let data = ctx.data.read().await;

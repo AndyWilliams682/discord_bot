@@ -1,14 +1,36 @@
-use crate::commands::error::CommandError;
+use crate::commands::{error::CommandError, BotCommand, CommandContext, CommandResponse};
 use serenity::all::{
-    CommandDataOption, CommandDataOptionValue, CommandOptionType, CreateCommand,
-    CreateCommandOption, CreateInteractionResponseMessage,
+    CommandDataOption, CommandDataOptionValue, CommandInteraction, CommandOptionType,
+    CreateCommand, CreateCommandOption,
 };
+use serenity::async_trait;
 use std::collections::HashMap;
+
+pub struct PoeCommand;
+
+#[async_trait]
+impl BotCommand for PoeCommand {
+    fn name(&self) -> &'static str {
+        "poe"
+    }
+
+    fn register(&self) -> CreateCommand {
+        register()
+    }
+
+    async fn execute(
+        &self,
+        interaction: &CommandInteraction,
+        context: CommandContext<'_>,
+    ) -> Result<CommandResponse, CommandError> {
+        run(&interaction.data.options, context.poe_accounts)
+    }
+}
 
 pub fn run(
     options: &[CommandDataOption],
     config: &HashMap<String, String>,
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+) -> Result<CommandResponse, CommandError> {
     let requested_user = &options.get(0).expect("Expected user option").value;
 
     let content = if let CommandDataOptionValue::User(user_id) = requested_user {
@@ -18,7 +40,7 @@ pub fn run(
             "Please provide a valid user".to_string(),
         ));
     };
-    Ok(CreateInteractionResponseMessage::new().content(content))
+    Ok(CommandResponse::new().content(content))
 }
 
 pub fn register() -> CreateCommand {
