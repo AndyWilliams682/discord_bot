@@ -5,7 +5,7 @@ use reqwest::{
 };
 use serenity::all::{
     CommandData, CommandDataOptionValue, CommandOptionType, CreateCommand, CreateCommandOption,
-    CreateInteractionResponseMessage, User,
+    User,
 };
 use thiserror::Error;
 use url::ParseError;
@@ -204,7 +204,7 @@ pub async fn run(
     invoker: &User,
     db: &impl GotdTrait,
     gif_dir: &str,
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+) -> Result<String, CommandError> {
     let url_option = data
         .options
         .iter()
@@ -262,9 +262,7 @@ pub async fn run(
     )
     .await
     {
-        Ok(()) => Ok(CreateInteractionResponseMessage::new()
-            .content("Gif submitted, thank you!")
-            .ephemeral(true)),
+        Ok(()) => Ok("Gif submitted, thank you!".to_string()),
         Err(why) => Err(why),
     }
 }
