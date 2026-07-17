@@ -10,8 +10,6 @@ use tokio::task;
 
 use crate::database::DatabaseResult;
 
-// const SECRET_ADMIN_ID: u64 = 255117530253754378; // My ID
-pub const SECRET_ADMIN_ID: u64 = 248966803139723264; // Grif's ID
 const WEIGHTS: [f32; 3] = [0.0, 0.0, 0.5];
 pub const PREV_RELEVANT_EVENTS: usize = WEIGHTS.len();
 
@@ -87,10 +85,12 @@ pub fn run(
     _options: &[CommandDataOption],
     invoker: &User,
     db: &impl SecretSantaTrait,
+    admin_id: u64,
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
-    let response_data = match invoker.id.get() {
-        SECRET_ADMIN_ID => admin_response(),
-        _ => user_response(invoker.id.get(), db),
+    let response_data = if invoker.id.get() == admin_id {
+        admin_response()
+    } else {
+        user_response(invoker.id.get(), db)
     };
     response_from_result(response_data)
 }

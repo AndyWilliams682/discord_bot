@@ -31,7 +31,7 @@ RUN apt-get update && \
 
 WORKDIR /usr/local/bin
 
-COPY config.json /usr/local/bin/
+COPY config.toml /usr/local/bin/
 
 # Copy the optimized binary from the builder stage
 COPY --from=builder /usr/src/app/target/release/discord_bot /usr/local/bin/discord_bot

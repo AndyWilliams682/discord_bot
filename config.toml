@@ -1,0 +1,21 @@
+# Status loop
+status_update_time = 3600
+
+# Database
+data_folder = "/home/ubuntu/bot_data"
+database_name = "mtg_secret_santa"
+
+# /gotd
+gif_post_hour = 9
+gif_guild_id = 323928878420590592
+gif_channel_name = "gif-of-the-day"
+gif_base_url = "https://gifs.ampersan.de"
+
+# /secret
+secret_admin_id = 248966803139723264
+
+# /poe
+[poe_accounts]
+"197178692957372417" = "irandms"
+"248966803139723264" = "miget"
+"255117530253754378" = "flyingrhino"

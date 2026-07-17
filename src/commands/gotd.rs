@@ -13,8 +13,6 @@ use url::ParseError;
 use crate::commands::error::CommandError;
 use crate::database::DatabaseResult;
 
-const GIF_DIRECTORY: &str = "/home/ubuntu/bot_data/gifs";
-
 #[derive(Debug, Error, PartialEq)]
 pub enum UrlValidationError {
     #[error("The URL must use the HTTP or HTTPS scheme")]
@@ -100,7 +98,8 @@ pub struct RealFileDownloader;
 impl FileDownloader for RealFileDownloader {
     async fn download(&self, url: &str) -> Result<Vec<u8>, String> {
         let client = Client::new();
-        let bytes = client.get(url)
+        let bytes = client
+            .get(url)
             .send()
             .await
             .map_err(|e| e.to_string())?
@@ -114,10 +113,7 @@ impl FileDownloader for RealFileDownloader {
 #[derive(Debug)]
 pub enum GifSubmission {
     Url(String),
-    Attachment {
-        url: String,
-        filename: String,
-    },
+    Attachment { url: String, filename: String },
 }
 
 impl GifSubmission {
@@ -144,6 +140,7 @@ impl GifSubmission {
         &self,
         custom_name: Option<String>,
         downloader: &impl FileDownloader,
+        gif_dir: &str,
     ) -> Result<std::path::PathBuf, CommandError> {
         let (source_url, original_filename) = match self {
             GifSubmission::Url(url) => (url, None),
@@ -184,13 +181,15 @@ impl GifSubmission {
             format!("gif_{}.{}", rand::random::<u32>(), extension)
         };
 
-        let save_dir = std::path::Path::new(GIF_DIRECTORY);
+        let save_dir = std::path::Path::new(gif_dir);
         std::fs::create_dir_all(save_dir)
             .map_err(|e| CommandError::Generic(format!("Failed to create directories: {}", e)))?;
 
         let dest_path = save_dir.join(dest_filename);
 
-        let bytes = downloader.download(source_url).await
+        let bytes = downloader
+            .download(source_url)
+            .await
             .map_err(|e| CommandError::Generic(format!("Failed to download file: {}", e)))?;
 
         std::fs::write(&dest_path, bytes)
@@ -204,6 +203,7 @@ pub async fn run(
     data: &CommandData,
     invoker: &User,
     db: &impl GotdTrait,
+    gif_dir: &str,
 ) -> Result<String, CommandError> {
     let url_option = data
         .options
@@ -252,7 +252,16 @@ pub async fn run(
     let submission = GifSubmission::new(url_opt, attachment_opt, &validator).await?;
 
     let downloader = RealFileDownloader;
-    match submit_gif_logic(submission, name_option, invoker.id.get(), db, &downloader).await {
+    match submit_gif_logic(
+        submission,
+        name_option,
+        invoker.id.get(),
+        db,
+        &downloader,
+        gif_dir,
+    )
+    .await
+    {
         Ok(()) => Ok("Gif submitted, thank you!".to_string()),
         Err(why) => Err(why),
     }
@@ -289,8 +298,11 @@ pub async fn submit_gif_logic(
     invoker_id: u64,
     db: &impl GotdTrait,
     downloader: &impl FileDownloader,
+    gif_dir: &str,
 ) -> Result<(), CommandError> {
-    let saved_path = submission.save_to_file(custom_name, downloader).await?;
+    let saved_path = submission
+        .save_to_file(custom_name, downloader, gif_dir)
+        .await?;
     let stem = saved_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -361,12 +373,16 @@ mod tests {
         .await
         .unwrap();
 
+        let temp_dir = std::env::temp_dir();
+        let temp_dir_str = temp_dir.to_str().unwrap();
+
         let res = submit_gif_logic(
             submission,
             Some("my_test_gif".to_string()),
             123,
             &db,
             &downloader,
+            temp_dir_str,
         )
         .await;
         assert!(res.is_ok());
@@ -376,7 +392,7 @@ mod tests {
         assert_eq!(inserted.1, "my_test_gif");
 
         // Clean up
-        let path = std::path::Path::new(GIF_DIRECTORY).join("my_test_gif.gif");
+        let path = temp_dir.join("my_test_gif.gif");
         if path.exists() {
             let _ = std::fs::remove_file(path);
         }
@@ -393,11 +409,17 @@ mod tests {
 
         let submission = GifSubmission::new(
             None,
-            Some(("http://example.com/attachment.gif".to_string(), "original.gif".to_string())),
+            Some((
+                "http://example.com/attachment.gif".to_string(),
+                "original.gif".to_string(),
+            )),
             &validator,
         )
         .await
         .unwrap();
+
+        let temp_dir = std::env::temp_dir();
+        let temp_dir_str = temp_dir.to_str().unwrap();
 
         let res = submit_gif_logic(
             submission,
@@ -405,8 +427,8 @@ mod tests {
             123,
             &db,
             &downloader,
-        )
-        .await;
+            temp_dir_str
+        ).await;
         assert!(res.is_ok());
 
         let inserted = db.inserted.lock().unwrap().clone().unwrap();
@@ -414,7 +436,7 @@ mod tests {
         assert_eq!(inserted.1, "original");
 
         // Clean up
-        let path = std::path::Path::new(GIF_DIRECTORY).join("original.gif");
+        let path = temp_dir.join("original.gif");
         if path.exists() {
             let _ = std::fs::remove_file(path);
         }

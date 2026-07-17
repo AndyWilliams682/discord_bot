@@ -4,7 +4,5 @@ services:
     container_name: discord_bot
     build: .
     restart: always
-    # env_file:
-    #   - .env
-    environment:
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
+    env_file:
+      - .env
