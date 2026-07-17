@@ -4,14 +4,41 @@ use reqwest::{
     Client, Url,
 };
 use serenity::all::{
-    CommandData, CommandDataOptionValue, CommandOptionType, CreateCommand, CreateCommandOption,
-    User,
+    CommandData, CommandDataOptionValue, CommandInteraction, CommandOptionType, CreateCommand,
+    CreateCommandOption, User,
 };
 use thiserror::Error;
 use url::ParseError;
 
-use crate::commands::error::CommandError;
-use crate::database::DatabaseResult;
+use crate::commands::{error::CommandError, BotCommand, CommandContext, CommandResponse};
+use crate::database::{BotDatabase, DatabaseResult};
+
+pub struct GotdCommand;
+
+#[async_trait]
+impl BotCommand for GotdCommand {
+    fn name(&self) -> &'static str {
+        "gotd"
+    }
+
+    fn should_defer(&self) -> bool {
+        true
+    }
+
+    fn register(&self) -> CreateCommand {
+        register()
+    }
+
+    async fn execute(
+        &self,
+        interaction: &CommandInteraction,
+        context: CommandContext<'_>,
+    ) -> Result<CommandResponse, CommandError> {
+        let db = BotDatabase::new(context.pool.clone(), context.config.secret_admin_id);
+        let gif_directory = format!("{}/gifs", context.config.data_folder);
+        run(&interaction.data, &interaction.user, &db, &gif_directory).await
+    }
+}
 
 #[derive(Debug, Error, PartialEq)]
 pub enum UrlValidationError {
@@ -204,7 +231,7 @@ pub async fn run(
     invoker: &User,
     db: &impl GotdTrait,
     gif_dir: &str,
-) -> Result<String, CommandError> {
+) -> Result<CommandResponse, CommandError> {
     let url_option = data
         .options
         .iter()
@@ -262,7 +289,9 @@ pub async fn run(
     )
     .await
     {
-        Ok(()) => Ok("Gif submitted, thank you!".to_string()),
+        Ok(()) => Ok(CommandResponse::new()
+            .content("Gif submitted, thank you!")
+            .ephemeral(true)),
         Err(why) => Err(why),
     }
 }
@@ -421,14 +450,7 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let temp_dir_str = temp_dir.to_str().unwrap();
 
-        let res = submit_gif_logic(
-            submission,
-            None,
-            123,
-            &db,
-            &downloader,
-            temp_dir_str
-        ).await;
+        let res = submit_gif_logic(submission, None, 123, &db, &downloader, temp_dir_str).await;
         assert!(res.is_ok());
 
         let inserted = db.inserted.lock().unwrap().clone().unwrap();

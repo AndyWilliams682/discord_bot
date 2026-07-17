@@ -6,6 +6,9 @@ use rand::thread_rng;
 use rusqlite;
 use rusqlite::params;
 use serenity::prelude::TypeMapKey;
+use std::fs;
+use std::fs::OpenOptions;
+use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -35,6 +38,9 @@ pub enum DatabaseError {
     #[error("Failed to execute the task")]
     TaskError(String),
 
+    #[error("Failed to prepare database file: {0}")]
+    FileError(String),
+
     #[error("Cannot join event as names have already been drawn")]
     JoinEventError(),
 }
@@ -57,11 +63,29 @@ impl From<JoinError> for DatabaseError {
     }
 }
 
+impl From<std::io::Error> for DatabaseError {
+    fn from(e: std::io::Error) -> Self {
+        DatabaseError::FileError(e.to_string())
+    }
+}
+
 pub type DatabaseResult<T> = Result<T, DatabaseError>;
 
-pub fn establish_connection(db_path: &str) -> DbPool {
+pub fn establish_connection(db_path: impl AsRef<Path>) -> DbPool {
+    prepare_database_file(db_path.as_ref()).expect("Failed to prepare database file.");
+
     let manager = SqliteConnectionManager::file(db_path);
     Pool::new(manager).expect("Failed to create pool.")
+}
+
+fn prepare_database_file(db_path: &Path) -> DatabaseResult<()> {
+    if let Some(parent) = db_path.parent().filter(|path| !path.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+
+    OpenOptions::new().create(true).append(true).open(db_path)?;
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -458,12 +482,8 @@ mod tests {
     #[tokio::test]
     async fn test_database_gotd() {
         let db = setup_test_db();
-        db.insert_gif(123, "gif1".to_string())
-            .await
-            .unwrap();
-        db.insert_gif(123, "gif2".to_string())
-            .await
-            .unwrap();
+        db.insert_gif(123, "gif1".to_string()).await.unwrap();
+        db.insert_gif(123, "gif2".to_string()).await.unwrap();
 
         let (user, name) = db.select_random_gif().await.unwrap();
         assert_eq!(user, 123);
@@ -544,5 +564,22 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_file(temp_file);
+    }
+
+    #[test]
+    fn test_establish_connection_creates_missing_database_file() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_discord_bot_db_dir_{}", rand::random::<u32>()));
+        let temp_file = temp_dir.join("nested").join("bot.bin");
+
+        assert!(!temp_file.exists());
+
+        let pool = establish_connection(&temp_file);
+        assert!(temp_file.exists());
+
+        let db = BotDatabase::new(pool, 248966803139723264);
+        assert!(db.initialize().is_ok());
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

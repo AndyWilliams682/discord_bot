@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serenity::all::{
-    Command, CreateInteractionResponse, CreateInteractionResponseMessage, EditInteractionResponse,
-    Interaction, Ready,
+    Command, CommandInteraction, CreateCommand, CreateInteractionResponse,
+    CreateInteractionResponseMessage, Interaction, Ready,
 };
 use serenity::async_trait;
 use serenity::prelude::*;
@@ -19,20 +19,34 @@ mod services;
 use config::{BotConfig, BotConfigWrapper};
 use database::{establish_connection, BotDatabase, DbPoolWrapper};
 
-/// The two response modes a slash command can use.
-///
-/// - `Immediate` – respond in one shot via `create_response(Message(...))`.
-/// - `Deferred`  – acknowledge first with `Defer`, then follow up with
-///   `edit_response(...)` once the slow work is done. The inner `String`
-///   is the final message content.
-enum CommandResponse {
-    Immediate(CreateInteractionResponseMessage),
-    Deferred(String),
-}
-
 struct Handler {
     is_loop_running: AtomicBool,
     poe_accounts: HashMap<String, String>,
+}
+
+async fn send_command_response(
+    ctx: &Context,
+    command: &CommandInteraction,
+    response: commands::CommandResponse,
+    deferred: bool,
+) {
+    let result = if deferred {
+        command
+            .edit_response(&ctx.http, response.into_edit_response())
+            .await
+            .map(|_| ())
+    } else {
+        command
+            .create_response(
+                &ctx.http,
+                CreateInteractionResponse::Message(response.into_initial_response()),
+            )
+            .await
+    };
+
+    if let Err(why) = result {
+        println!("Cannot respond to slash command: {}", why);
+    }
 }
 
 #[async_trait]
@@ -40,21 +54,27 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
 
-        let _global_command = Command::set_global_commands(
-            &ctx.http,
-            vec![
-                commands::ping::register(),
-                commands::hidden_ability::register(),
-                commands::secret::register(),
-                commands::poe::register(),
-                commands::gotd::register(),
-            ],
-        )
-        .await;
+        let registered_commands = commands::all();
+        let mut global_commands = Vec::new();
+        let mut guild_commands: HashMap<u64, Vec<CreateCommand>> = HashMap::new();
 
-        let _guild_command = serenity::all::GuildId::new(704782281578905670)
-            .set_commands(&ctx.http, vec![commands::integration_test::register()])
-            .await;
+        for command in registered_commands.iter() {
+            match command.registration() {
+                commands::CommandRegistration::Global => global_commands.push(command.register()),
+                commands::CommandRegistration::Guild(guild_id) => guild_commands
+                    .entry(guild_id)
+                    .or_default()
+                    .push(command.register()),
+            }
+        }
+
+        let _global_command = Command::set_global_commands(&ctx.http, global_commands).await;
+
+        for (guild_id, commands) in guild_commands {
+            let _guild_command = serenity::all::GuildId::new(guild_id)
+                .set_commands(&ctx.http, commands)
+                .await;
+        }
 
         let loop_ctx = Arc::new(ctx);
 
@@ -81,20 +101,34 @@ impl EventHandler for Handler {
             Interaction::Command(command) => {
                 println!("Received command interaction: {:#?}", command);
 
-                let data = ctx.data.read().await;
-                let pool = data
-                    .get::<DbPoolWrapper>()
-                    .expect("Expected DbPool in TypeMap");
-                let config = data
-                    .get::<BotConfigWrapper>()
-                    .expect("Expected BotConfig in TypeMap");
+                let (pool, config) = {
+                    let data = ctx.data.read().await;
+                    let pool = data
+                        .get::<DbPoolWrapper>()
+                        .expect("Expected DbPool in TypeMap")
+                        .clone();
+                    let config = data
+                        .get::<BotConfigWrapper>()
+                        .expect("Expected BotConfig in TypeMap")
+                        .clone();
+                    (pool, config)
+                };
 
-                // Determine upfront if this command needs a deferred response,
-                // so we can acknowledge within Discord's 3-second window before
-                // any slow processing begins.
-                let is_deferred = matches!(command.data.name.as_str(), "gotd" | "ha");
+                let registered_commands = commands::all();
+                let bot_command = registered_commands
+                    .iter()
+                    .find(|candidate| candidate.name() == command.data.name.as_str());
 
-                if is_deferred {
+                let Some(bot_command) = bot_command else {
+                    let response = commands::CommandResponse::new()
+                        .content("not implemented :(")
+                        .ephemeral(true);
+                    send_command_response(&ctx, &command, response, false).await;
+                    return;
+                };
+
+                let deferred = bot_command.should_defer();
+                if deferred {
                     if let Err(why) = command
                         .create_response(
                             &ctx.http,
@@ -104,97 +138,27 @@ impl EventHandler for Handler {
                         )
                         .await
                     {
-                        println!("Cannot defer interaction: {}", why);
+                        println!("Cannot defer slash command: {}", why);
                         return;
                     }
                 }
 
-                // Every arm returns Result<CommandResponse, CommandError>.
-                // Deferred commands return Deferred(content); all others return Immediate(msg).
-                let response = match command.data.name.as_str() {
-                    "ping" => commands::ping::run(&command.data.options)
-                        .map(CommandResponse::Immediate),
-                    "ha" => commands::hidden_ability::run(&command.data.options)
-                        .await
-                        .map(CommandResponse::Deferred),
-                    "secret" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
-                        commands::secret::run(
-                            &command.data.options,
-                            &command.user,
-                            &db,
-                            config.secret_admin_id,
-                        ).map(CommandResponse::Immediate)
-                    }
-                    "poe" => commands::poe::run(&command.data.options, &self.poe_accounts)
-                        .map(CommandResponse::Immediate),
-                    "gotd" => {
-                        let db = BotDatabase::new((*pool).as_ref().clone(), config.secret_admin_id);
-                        let gif_directory = format!("{}/gifs", config.data_folder);
-                        commands::gotd::run(&command.data, &command.user, &db, &gif_directory)
-                            .await
-                            .map(CommandResponse::Deferred)
-                    }
-                    "integration_test" => {
-                        commands::integration_test::run(&command.data.options)
-                            .map(CommandResponse::Immediate)
-                    }
-                    _ => Ok(CommandResponse::Immediate(
-                        CreateInteractionResponseMessage::new()
-                            .content("not implemented :(")
-                            .ephemeral(true),
-                    )),
+                let command_context = commands::CommandContext {
+                    pool: pool.as_ref(),
+                    config: config.as_ref(),
+                    poe_accounts: &self.poe_accounts,
                 };
 
-                match response {
-                    Ok(CommandResponse::Immediate(msg)) => {
-                        if let Err(why) = command
-                            .create_response(&ctx.http, CreateInteractionResponse::Message(msg))
-                            .await
-                        {
-                            println!("Cannot respond to slash command: {}", why);
-                        }
-                    }
-                    Ok(CommandResponse::Deferred(content)) => {
-                        // Defer was already sent above; just edit with the result.
-                        if let Err(why) = command
-                            .edit_response(
-                                &ctx.http,
-                                EditInteractionResponse::new().content(content),
-                            )
-                            .await
-                        {
-                            println!("Cannot edit deferred response: {}", why);
-                        }
-                    }
-                    Err(why) => {
-                        // Send the error back. Use edit_response if we already deferred,
-                        // otherwise use create_response.
-                        let error_content = why.to_string();
-                        if is_deferred {
-                            if let Err(e) = command
-                                .edit_response(
-                                    &ctx.http,
-                                    EditInteractionResponse::new().content(error_content),
-                                )
-                                .await
-                            {
-                                println!("Cannot send deferred error response: {}", e);
-                            }
-                        } else {
-                            let msg = CreateInteractionResponseMessage::new()
-                                .content(error_content)
-                                .ephemeral(true);
-                            if let Err(e) = command
-                                .create_response(&ctx.http, CreateInteractionResponse::Message(msg))
-                                .await
-                            {
-                                println!("Cannot send error response: {}", e);
-                            }
-                        }
-                    }
-                }
+                let response = bot_command.execute(&command, command_context).await;
 
+                let response = match response {
+                    Ok(data) => data,
+                    Err(why) => commands::CommandResponse::new()
+                        .content(why.to_string())
+                        .ephemeral(true),
+                };
+
+                send_command_response(&ctx, &command, response, deferred).await;
             }
             Interaction::Component(component) => {
                 let data = ctx.data.read().await;

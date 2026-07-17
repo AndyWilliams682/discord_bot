@@ -1,16 +1,42 @@
-use crate::commands::error::CommandError;
-use serenity::all::{
-    ButtonStyle, CommandDataOption, CreateActionRow, CreateButton, CreateCommand,
-    CreateInteractionResponseMessage,
+use crate::commands::{
+    error::CommandError, BotCommand, CommandContext, CommandRegistration, CommandResponse,
 };
+use serenity::all::{
+    ButtonStyle, CommandDataOption, CommandInteraction, CreateActionRow, CreateButton,
+    CreateCommand, CreateInteractionResponseMessage,
+};
+use serenity::async_trait;
 use std::collections::HashMap;
 
 use crate::commands::gotd::GotdTrait;
 use crate::commands::secret::SecretSantaTrait;
 
-pub fn run(
-    _options: &[CommandDataOption],
-) -> Result<CreateInteractionResponseMessage, CommandError> {
+pub struct IntegrationTestCommand;
+
+#[async_trait]
+impl BotCommand for IntegrationTestCommand {
+    fn name(&self) -> &'static str {
+        "integration_test"
+    }
+
+    fn registration(&self) -> CommandRegistration {
+        CommandRegistration::Guild(704782281578905670)
+    }
+
+    fn register(&self) -> CreateCommand {
+        register()
+    }
+
+    async fn execute(
+        &self,
+        interaction: &CommandInteraction,
+        _context: CommandContext<'_>,
+    ) -> Result<CommandResponse, CommandError> {
+        run(&interaction.data.options)
+    }
+}
+
+pub fn run(_options: &[CommandDataOption]) -> Result<CommandResponse, CommandError> {
     let row = CreateActionRow::Buttons(vec![
         CreateButton::new("test_ha_success")
             .style(ButtonStyle::Primary)
@@ -29,7 +55,7 @@ pub fn run(
             .label("Test DB (Error)"),
     ]);
 
-    Ok(CreateInteractionResponseMessage::new()
+    Ok(CommandResponse::new()
         .content("Integration Tests:")
         .components(vec![row]))
 }
