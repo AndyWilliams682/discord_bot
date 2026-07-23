@@ -53,6 +53,9 @@ pub fn run(_options: &[CommandDataOption]) -> Result<CommandResponse, CommandErr
         CreateButton::new("test_db_error")
             .style(ButtonStyle::Danger)
             .label("Test DB (Error)"),
+        CreateButton::new("test_gif")
+            .style(ButtonStyle::Primary)
+            .label("Test Gif"),
     ]);
 
     Ok(CommandResponse::new()
@@ -113,6 +116,15 @@ pub async fn button_handler(
             }
         }
         "test_db_error" => "DB Error integration test simulated success!".to_string(),
+        "test_gif" => {
+            let total = _db.get_total_gifs().await.unwrap_or(0);
+            let latest = _db.get_latest_gif().await.unwrap_or(None);
+            if let Some((user_id, name)) = latest {
+                format!("Total gifs: {}. Latest gif: {} by {}", total, name, user_id)
+            } else {
+                format!("Total gifs: {}. No gifs submitted.", total)
+            }
+        }
         _ => "Unknown test triggered".to_string(),
     };
 

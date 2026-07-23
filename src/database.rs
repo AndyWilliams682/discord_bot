@@ -240,6 +240,29 @@ impl GotdTrait for BotDatabase {
         })
         .await?
     }
+
+    async fn get_total_gifs(&self) -> DatabaseResult<u64> {
+        let pool_clone = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool_clone.get()?;
+            let count: u64 = conn.query_row("SELECT COUNT(*) FROM gifs", params![], |row| row.get(0))?;
+            Ok(count)
+        }).await?
+    }
+
+    async fn get_latest_gif(&self) -> DatabaseResult<Option<(u64, String)>> {
+        let pool_clone = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool_clone.get()?;
+            let mut stmt = conn.prepare("SELECT submitted_by, name FROM gifs ORDER BY rowid DESC LIMIT 1")?;
+            let mut rows = stmt.query(params![])?;
+            if let Some(row) = rows.next()? {
+                Ok(Some((row.get(0)?, row.get(1)?)))
+            } else {
+                Ok(None)
+            }
+        }).await?
+    }
 }
 
 #[async_trait]
@@ -482,8 +505,21 @@ mod tests {
     #[tokio::test]
     async fn test_database_gotd() {
         let db = setup_test_db();
+
+        let total = db.get_total_gifs().await.unwrap();
+        assert_eq!(total, 0);
+
+        let latest = db.get_latest_gif().await.unwrap();
+        assert!(latest.is_none());
+
         db.insert_gif(123, "gif1".to_string()).await.unwrap();
         db.insert_gif(123, "gif2".to_string()).await.unwrap();
+
+        let total = db.get_total_gifs().await.unwrap();
+        assert_eq!(total, 2);
+
+        let latest = db.get_latest_gif().await.unwrap();
+        assert_eq!(latest, Some((123, "gif2".to_string())));
 
         let (user, name) = db.select_random_gif().await.unwrap();
         assert_eq!(user, 123);
