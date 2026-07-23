@@ -73,6 +73,8 @@ impl From<ToStrError> for UrlValidationError {
 pub trait GotdTrait: Send + Sync {
     async fn insert_gif(&self, user_id: u64, name: String) -> DatabaseResult<()>;
     async fn select_random_gif(&self) -> DatabaseResult<(u64, String)>;
+    async fn get_total_gifs(&self) -> DatabaseResult<u64>;
+    async fn get_latest_gif(&self) -> DatabaseResult<Option<(u64, String)>>;
 }
 
 #[async_trait]
@@ -358,6 +360,12 @@ mod tests {
         }
         async fn select_random_gif(&self) -> DatabaseResult<(u64, String)> {
             Ok(self.random_res.clone().unwrap())
+        }
+        async fn get_total_gifs(&self) -> DatabaseResult<u64> {
+            Ok(if self.inserted.lock().unwrap().is_some() { 1 } else { 0 })
+        }
+        async fn get_latest_gif(&self) -> DatabaseResult<Option<(u64, String)>> {
+            Ok(self.inserted.lock().unwrap().clone())
         }
     }
 
