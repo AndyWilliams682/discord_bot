@@ -209,6 +209,7 @@ pub fn current_year() -> i32 {
 }
 
 pub fn start_new_event_logic(db: &impl SecretSantaTrait) -> SecretResult<SecretResponse> {
+    tracing::info!("Starting a new Secret Santa event");
     db.start_new_event()?;
     Ok(SecretResponse {
         content: "New event has begun!".to_string(),
@@ -227,6 +228,7 @@ pub fn toggle_event_participation_logic(
     db: &impl SecretSantaTrait,
 ) -> SecretResult<SecretResponse> {
     let toggled_participation = db.toggle_event_participation(user_id)?;
+    tracing::info!("User {} toggled participation in Secret Santa", user_id);
     Ok(SecretResponse {
         content: toggled_participation.to_string(),
         buttons: vec![],
@@ -245,17 +247,22 @@ pub async fn draw_names_interaction(
     ctx: &Context,
     db: impl SecretSantaTrait + Clone + 'static,
 ) -> Result<CreateInteractionResponseMessage, CommandError> {
+    tracing::info!("Drawing Secret Santa names...");
     let assignments_res = task::spawn_blocking(move || db.get_drawn_names())
         .await
         .expect("Failed to run database tasks");
 
     match assignments_res {
         Ok(assignments) => {
+            tracing::info!("Successfully drew names for {} participants", assignments.len());
             notify_participants(ctx, &assignments).await;
             Ok(CreateInteractionResponseMessage::new()
                 .content("Names have been drawn! Check your DMs"))
         }
-        Err(why) => Err(why.into()),
+        Err(why) => {
+            tracing::error!("Failed to draw Secret Santa names: {:?}", why);
+            Err(why.into())
+        }
     }
 }
 
@@ -270,14 +277,14 @@ async fn notify_participants(ctx: &Context, assignments: &Assignments) {
             );
             if let Ok(dm_channel) = participant_user.create_dm_channel(&ctx.http).await {
                 if let Err(why) = dm_channel.say(&ctx.http, dm_message).await {
-                    println!(
-                        "Could not fetch Discord user object for ID {}: {}",
+                    tracing::error!(
+                        "Could not send DM to Discord user {}: {}",
                         participant_id, why
                     );
                 }
             }
         } else {
-            println!(
+            tracing::error!(
                 "Could not fetch Discord user object for ID {}",
                 participant_id
             );

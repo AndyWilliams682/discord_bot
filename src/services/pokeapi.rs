@@ -55,17 +55,21 @@ impl RealPokeAPIService {
 impl PokeAPIService for RealPokeAPIService {
     async fn get_hidden_ability(&self, api_name: &str) -> PokeAPIResult {
         let url = format!("https://pokeapi.co/api/v2/pokemon/{}", api_name);
+        tracing::debug!("Fetching hidden ability from PokeAPI: {}", url);
         let response = reqwest::get(&url).await?;
         let status = response.status();
 
         if !status.is_success() {
+            tracing::warn!("PokeAPI returned non-success status {} for {}", status, api_name);
             return Err(PokeAPIError::NonSuccessStatus(
                 api_name.to_string(),
                 status.as_u16(),
             ));
         }
         let parsed = response.json::<Value>().await?;
-        Ok(RealPokeAPIService::extract_hidden_ability(&parsed))
+        let ability = RealPokeAPIService::extract_hidden_ability(&parsed);
+        tracing::debug!("Retrieved hidden ability '{}' for {}", ability, api_name);
+        Ok(ability)
     }
 }
 

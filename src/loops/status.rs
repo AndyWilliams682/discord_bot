@@ -6,6 +6,7 @@ use serenity::{gateway::ActivityData, prelude::Context};
 use crate::config::BotConfig;
 
 pub fn start(ctx: Arc<Context>, config: Arc<BotConfig>) {
+    tracing::info!("Initializing Status update loop task");
     tokio::spawn(async move {
         loop {
             set_status(Arc::clone(&ctx)).await;
@@ -31,6 +32,7 @@ async fn set_status(ctx: Arc<Context>) {
     let mut rng = StdRng::from_entropy();
 
     let status_choice = status_options[dist.sample(&mut rng)];
+    tracing::debug!("Setting Discord status activity: Playing {}", status_choice);
 
     ctx.set_activity(Some(ActivityData::playing(status_choice)));
 }

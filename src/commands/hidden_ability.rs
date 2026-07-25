@@ -36,9 +36,11 @@ pub async fn run(options: &[CommandDataOption]) -> Result<CommandResponse, Comma
         &options.get(0).expect("Expected string option").value
     {
         let pokemon_list = raw_input.split(", ").collect::<Vec<&str>>();
+        tracing::info!("Executing '/ha' command for {} pokemon query: '{}'", pokemon_list.len(), raw_input);
         let api_service = RealPokeAPIService::new();
         let mut content = get_hidden_abilities(pokemon_list, &api_service).await;
         if content.len() == 0 {
+            tracing::warn!("Input '{}' yielded no valid pokemon results", raw_input);
             content = format!("Your input \"{}\" has no valid pokemon", raw_input)
         }
         Ok(CommandResponse::new().content(content))

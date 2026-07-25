@@ -9,6 +9,7 @@ use crate::database::BotDatabase;
 pub fn start(ctx: Arc<Context>, db: BotDatabase, config: Arc<BotConfig>) {
     let gotd_context = Arc::clone(&ctx);
     let db = db.clone();
+    tracing::info!("Initializing GOTD loop task (post hour: {})", config.gif_post_hour);
     tokio::spawn(async move {
         loop {
             let now = Local::now();
@@ -17,7 +18,13 @@ pub fn start(ctx: Arc<Context>, db: BotDatabase, config: Arc<BotConfig>) {
                 .signed_duration_since(now)
                 .to_std()
                 .unwrap_or_else(|_| Duration::from_secs(0));
+            tracing::info!(
+                "GOTD loop sleeping for {} seconds until next post time ({})",
+                wait_dur.as_secs(),
+                next
+            );
             tokio::time::sleep(wait_dur).await;
+            tracing::info!("Executing GOTD post...");
             post_gotd(Arc::clone(&gotd_context), &db, &config).await;
         }
     });
@@ -44,17 +51,17 @@ async fn post_gotd(ctx: Arc<Context>, db: &impl GotdTrait, config: &BotConfig) {
                 .send_message(&ctx.http, CreateMessage::new().content(&content))
                 .await
             {
-                println!(
+                tracing::error!(
                     "Failed to send GOTD message to channel {}: {:?}",
                     id.get(),
                     why
                 );
             }
         } else {
-            println!("Channel {} not found in guild {}", channel_name, guild_id);
+            tracing::warn!("Channel {} not found in guild {}", channel_name, guild_id);
         }
     } else {
-        println!("Failed to fetch channels for guild {}", guild_id);
+        tracing::error!("Failed to fetch channels for guild {}", guild_id);
     }
 }
 

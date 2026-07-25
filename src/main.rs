@@ -9,6 +9,11 @@ use serenity::all::{
 };
 use serenity::async_trait;
 use serenity::prelude::*;
+use tracing::{debug, error, info, warn};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{fmt, EnvFilter};
 
 mod commands;
 mod config;
@@ -22,6 +27,27 @@ use database::{establish_connection, BotDatabase, DbPoolWrapper};
 struct Handler {
     is_loop_running: AtomicBool,
     poe_accounts: HashMap<String, String>,
+}
+
+// Keep guard alive for duration of program execution
+static LOGGER_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+    std::sync::OnceLock::new();
+
+fn init_tracing() {
+    let file_appender = RollingFileAppender::new(Rotation::DAILY, "logs", "discord_bot.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let _ = LOGGER_GUARD.set(guard);
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let stdout_layer = fmt::layer().with_writer(std::io::stdout);
+    let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
 }
 
 async fn send_command_response(
@@ -45,14 +71,14 @@ async fn send_command_response(
     };
 
     if let Err(why) = result {
-        println!("Cannot respond to slash command: {}", why);
+        error!("Cannot respond to slash command: {}", why);
     }
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+        info!("{} is connected!", ready.user.name);
 
         let registered_commands = commands::all();
         let mut global_commands = Vec::new();
@@ -79,6 +105,7 @@ impl EventHandler for Handler {
         let loop_ctx = Arc::new(ctx);
 
         if !self.is_loop_running.load(Ordering::Relaxed) {
+            info!("Starting background loops...");
             let data = loop_ctx.data.read().await;
             let pool = data
                 .get::<DbPoolWrapper>()
@@ -93,13 +120,14 @@ impl EventHandler for Handler {
             let db = BotDatabase::new((*pool).clone(), config.secret_admin_id);
             loops::gotd_loop::start(loop_ctx.clone(), db, config);
             self.is_loop_running.swap(true, Ordering::Relaxed);
+            info!("Background loops started successfully.");
         }
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match interaction {
             Interaction::Command(command) => {
-                println!("Received command interaction: {:#?}", command);
+                debug!("Received command interaction: {:#?}", command);
 
                 let (pool, config) = {
                     let data = ctx.data.read().await;
@@ -120,12 +148,18 @@ impl EventHandler for Handler {
                     .find(|candidate| candidate.name() == command.data.name.as_str());
 
                 let Some(bot_command) = bot_command else {
+                    warn!("Command not implemented: {}", command.data.name);
                     let response = commands::CommandResponse::new()
                         .content("not implemented :(")
                         .ephemeral(true);
                     send_command_response(&ctx, &command, response, false).await;
                     return;
                 };
+
+                info!(
+                    "Executing command '{}' invoked by {}",
+                    command.data.name, command.user.name
+                );
 
                 let deferred = bot_command.should_defer();
                 if deferred {
@@ -138,7 +172,7 @@ impl EventHandler for Handler {
                         )
                         .await
                     {
-                        println!("Cannot defer slash command: {}", why);
+                        error!("Cannot defer slash command: {}", why);
                         return;
                     }
                 }
@@ -153,14 +187,18 @@ impl EventHandler for Handler {
 
                 let response = match response {
                     Ok(data) => data,
-                    Err(why) => commands::CommandResponse::new()
-                        .content(why.to_string())
-                        .ephemeral(true),
+                    Err(why) => {
+                        error!("Error executing command '{}': {}", command.data.name, why);
+                        commands::CommandResponse::new()
+                            .content(why.to_string())
+                            .ephemeral(true)
+                    }
                 };
 
                 send_command_response(&ctx, &command, response, deferred).await;
             }
             Interaction::Component(component) => {
+                debug!("Received component interaction: {:#?}", component);
                 let data = ctx.data.read().await;
                 let pool = data
                     .get::<DbPoolWrapper>()
@@ -202,9 +240,12 @@ impl EventHandler for Handler {
 
                 let response = match response {
                     Ok(data) => data,
-                    Err(why) => CreateInteractionResponseMessage::new()
-                        .content(why.to_string())
-                        .ephemeral(true),
+                    Err(why) => {
+                        error!("Component interaction error: {}", why);
+                        CreateInteractionResponseMessage::new()
+                            .content(why.to_string())
+                            .ephemeral(true)
+                    }
                 };
 
                 // Respond to the button press interaction
@@ -212,7 +253,7 @@ impl EventHandler for Handler {
                     .create_response(&ctx.http, CreateInteractionResponse::Message(response))
                     .await
                 {
-                    println!("Cannot respond to secret button press: {}", why);
+                    error!("Cannot respond to secret button press: {}", why);
                 }
             }
             _ => {}
@@ -222,8 +263,10 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
+    init_tracing();
+
     let config = Arc::new(BotConfig::load().unwrap_or_else(|e| {
-        eprintln!("Configuration Error: {}", e);
+        error!("Configuration Error: {}", e);
         std::process::exit(1);
     }));
 
@@ -234,7 +277,7 @@ async fn main() {
     // let http_client = Http::new_with_application_id(&token, 704782601273213079);
     // let delete_command = http_client.delete_guild_application_command(323928878420590592, 1049455263440191528).await;
     // println!("{:?}", delete_command);
-    
+
     // Build our client.
     let mut client = Client::builder(&config.discord_token, GatewayIntents::empty())
         .event_handler(Handler {
@@ -261,8 +304,10 @@ async fn main() {
         data.insert::<BotConfigWrapper>(config.clone());
     }
 
+    info!("Starting Discord bot client...");
     // Finally, start a single shard, and start listening to events.
     if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
+        error!("Client error: {:?}", why);
     }
 }
+

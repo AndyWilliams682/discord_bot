@@ -175,6 +175,7 @@ impl GifSubmission {
             GifSubmission::Url(url) => (url, None),
             GifSubmission::Attachment { url, filename } => (url, Some(filename.as_str())),
         };
+        tracing::info!("Downloading GIF submission from: {}", source_url);
 
         // Determine extension
         let extension = if let Some(orig_name) = original_filename {
